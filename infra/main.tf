@@ -112,6 +112,11 @@ resource "azurerm_container_app_environment" "main" {
   location                   = azurerm_resource_group.main.location
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
   tags                       = local.tags
+
+  lifecycle {
+    # Azure adds a default "Consumption" workload profile that Terraform cannot remove.
+    ignore_changes = [workload_profile]
+  }
 }
 
 # ---- Role assignments: least privilege, for the app identity AND the developer (az login) ------
@@ -142,3 +147,4 @@ resource "azurerm_role_assignment" "this" {
   role_definition_name = each.value.role.role
   principal_id         = each.value.principal
 }
+

@@ -17,6 +17,7 @@ Judge and generator are the same model (gpt-5.4-mini), so judge scores are optim
 | 8 | g-balanced | r5 retrieval + "answer what is supported" prompt (zero-shot) | 0.94 | 0.95 | 0.00 | 0.99 | 0.88 | 0.91 | 0.00 | 0.89 | 4.5 s / 10.4 s |
 | 9 | **g-fewshot** | r5 retrieval + balanced prompt + 3 few-shot examples | 0.94 | 0.95 | 0.00 | 1.00 | 0.88 | 0.89 | 0.02 | 1.00 | 2.9 s / 10.3 s |
 | 10 | az-fewshot | **Azure**: AI Search (vector store) + Entra-token auth to Azure OpenAI, same pipeline as run 9 | 0.94 | 0.95 | 0.00 | 1.00 | 0.85 | 0.91 | 0.05 | 1.00 | 3.1 s / 11.0 s |
+| 11 | az-embed3small | Embeddings: bge-small (384d, local) -> Azure OpenAI text-embedding-3-small (1536d, cloud); hybrid + rerank unchanged (retrieval only) | 0.94 | 0.95 | 0.00 | | | | | | |
 
 ## Baseline findings (run 20261003-183218)
 
@@ -72,3 +73,10 @@ left retrieval **identical** (recall@5 0.94, MRR 0.95: same embeddings, same hyb
 the app). Generation moved within noise (correctness 0.85 vs 0.88, false refusals 0.05 vs 0.02, p50 3.1 s vs 2.9 s).
 Conclusion: the provider abstraction works; the migration changed infrastructure, not quality.
 Not yet tried: AI Search native hybrid / semantic ranker (needs a paid tier) and Azure OpenAI embeddings.
+
+## Week 5: embeddings in the cloud (run 11)
+
+Functions cannot ship PyTorch, so cloud ingestion uses Azure OpenAI embeddings. Retrieval quality was identical to
+the local bge-small model (recall@5 0.94, MRR 0.95): with hybrid search and a reranker in front, the embedding
+model is no longer the bottleneck. Cloud embedding is therefore a free choice quality-wise. The cost is rate limits:
+a 50K tokens/min deployment made the 1,337-chunk ingest take about 10 minutes (the client backs off on 429).

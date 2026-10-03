@@ -100,3 +100,13 @@ def test_generic_document_is_not_labelled_recitals(ing):
 
 def test_html_is_converted_to_text():
     assert "Hello" in parse_document("p.html", b"<html><body><h1>Hello</h1></body></html>")
+
+
+def test_reconcile_follows_current_blob_state(ing):
+    blobs = {"a.txt": DOC_V1}
+    fetch = blobs.get
+    assert ing.reconcile("a.txt", fetch).action == "indexed"
+    blobs.pop("a.txt")  # a stale "created" event arriving after the blob was deleted
+    assert ing.reconcile("a.txt", fetch).action == "deleted"
+    assert ing.store.chunks == {}
+    assert ing.reconcile("a.txt", fetch).action == "deleted"  # duplicate event: harmless

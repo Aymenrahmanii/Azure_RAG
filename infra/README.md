@@ -31,3 +31,22 @@ Then set in `.env`: `VECTOR_STORE=azure_search`, `AZURE_SEARCH_ENDPOINT=<search_
 - Only `search_sku = "free"` is intended. Basic is ~75 USD/month: it would eat most of a 100 USD credit in weeks.
 - Tear everything down when not working: `terraform destroy` (recreate with `apply`; re-run `python -m app.cli ingest`).
 - Never commit `terraform.tfvars` or `*.tfstate` (both are git-ignored).
+
+## Ingestion pipeline (week 5)
+
+```
+Blob upload/delete -> Event Grid system topic -> func on_blob_event -> Service Bus queue "ingest" (max 5 deliveries -> DLQ)
+                                                                         -> func process_document -> reconcile(blob)
+                                                                              |-> AI Search (chunks, replaced atomically-ish)
+                                                                              `-> Cosmos DB "documents" (status per doc)
+```
+
+Deploy the code, then enable the Event Grid subscription (it can only be created once the function exists):
+
+```powershell
+python scripts/package_functions.py
+az functionapp deployment source config-zip -g rg-azrag-dev -n <func-name> --src dist/functions.zip
+# set enable_event_subscription = true in terraform.tfvars, then terraform apply
+```
+
+Operate: `python scripts/doc_status.py [id]` (status + chunk count), `python scripts/dlq.py counts|peek|requeue|purge`.

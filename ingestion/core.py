@@ -6,6 +6,7 @@ events can never leave the index in the wrong state.
 """
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -88,6 +89,15 @@ class Ingestor:
         self.store.delete_by_doc(doc_id)
         self.status.put(doc_id, status="deleted", chunks=0, error=None)
         return Outcome("deleted")
+
+    def reconcile(
+        self, blob_name: str, fetch: Callable[[str], bytes | None], attempt: int = 1
+    ) -> Outcome:
+        """Make the index match the blob's current state. `fetch` returns None if it is gone."""
+        data = fetch(blob_name)
+        if data is None:
+            return self.delete(blob_name)
+        return self.upsert(blob_name, data, attempt)
 
     def mark_failed(self, blob_name: str, error: str, attempt: int) -> None:
         self.status.put(doc_id_for(blob_name), status="failed", error=error[:500], attempts=attempt)

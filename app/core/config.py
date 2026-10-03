@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_api_key: str = ""
 
+    # Ingestion pipeline (set as app settings on the Function app)
+    cosmos_endpoint: str = ""
+    cosmos_database: str = "ragdb"
+    cosmos_container: str = "documents"
+    storage_account_url: str = ""
+    documents_container: str = "documents"
+    ingest_queue: str = "ingest"
+    servicebus_namespace: str = ""  # e.g. sb-azrag-dev-xxxxx.servicebus.windows.net
+
     azure_openai_endpoint: str = ""
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""
