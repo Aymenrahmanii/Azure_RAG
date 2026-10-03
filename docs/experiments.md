@@ -60,6 +60,6 @@ and Azure's built-in prompt shield blocked the "ignore previous instructions" at
   and the false-refusal/abstention trade-off are large enough to trust; strict vs few-shot correctness is not.
 - Recitals are excluded entirely. That is a deliberate trade-off: a question about legislative intent would
   not find them. Revisit with a recital-specific route if needed.
-- Remaining weak spot: multi-article questions (recall@5 0.77): the answer spans 2-3 articles but top-5 slots
-  are taken by neighbouring chunks of the first article. Candidates: diversity (MMR), a larger k for
+- Remaining weak spot: multi-article questions (recall@5 0.77): the answer spans 2-3 articles; hypothesis (not yet
+  verified): top-5 slots are taken by several chunks of the first article. Candidates: diversity (MMR), a larger k for
   multi-part questions, or query decomposition (an agentic RAG use case).
