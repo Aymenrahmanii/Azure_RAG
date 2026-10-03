@@ -16,6 +16,7 @@ Judge and generator are the same model (gpt-5.4-mini), so judge scores are optim
 | 7 | g-strict | r5 retrieval + original strict prompt (zero-shot) | 0.94 | 0.95 | 0.00 | 1.00 | 0.83 | 0.94 | 0.12 | 1.00 | 3.5 s / 10.8 s |
 | 8 | g-balanced | r5 retrieval + "answer what is supported" prompt (zero-shot) | 0.94 | 0.95 | 0.00 | 0.99 | 0.88 | 0.91 | 0.00 | 0.89 | 4.5 s / 10.4 s |
 | 9 | **g-fewshot** | r5 retrieval + balanced prompt + 3 few-shot examples | 0.94 | 0.95 | 0.00 | 1.00 | 0.88 | 0.89 | 0.02 | 1.00 | 2.9 s / 10.3 s |
+| 10 | az-fewshot | **Azure**: AI Search (vector store) + Entra-token auth to Azure OpenAI, same pipeline as run 9 | 0.94 | 0.95 | 0.00 | 1.00 | 0.85 | 0.91 | 0.05 | 1.00 | 3.1 s / 11.0 s |
 
 ## Baseline findings (run 20261003-183218)
 
@@ -63,3 +64,11 @@ and Azure's built-in prompt shield blocked the "ignore previous instructions" at
 - Remaining weak spot: multi-article questions (recall@5 0.77): the answer spans 2-3 articles; hypothesis (not yet
   verified): top-5 slots are taken by several chunks of the first article. Candidates: diversity (MMR), a larger k for
   multi-part questions, or query decomposition (an agentic RAG use case).
+
+## Week 4: local vs Azure (run 10)
+
+Moving the vector store to Azure AI Search (free tier) and authenticating with Entra ID instead of an API key
+left retrieval **identical** (recall@5 0.94, MRR 0.95: same embeddings, same hybrid + rerank logic, which runs in
+the app). Generation moved within noise (correctness 0.85 vs 0.88, false refusals 0.05 vs 0.02, p50 3.1 s vs 2.9 s).
+Conclusion: the provider abstraction works; the migration changed infrastructure, not quality.
+Not yet tried: AI Search native hybrid / semantic ranker (needs a paid tier) and Azure OpenAI embeddings.
