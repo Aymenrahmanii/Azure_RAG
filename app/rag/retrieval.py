@@ -1,0 +1,72 @@
+"""Configurable retrieval: dense, optional BM25 hybrid (RRF), optional cross-encoder rerank."""
+
+import re
+from dataclasses import dataclass
+
+from rank_bm25 import BM25Okapi
+from sentence_transformers import CrossEncoder
+
+from app.providers.base import Chunk, Embedder, RetrievedChunk
+from app.providers.local import ChromaStore
+
+RRF_K = 60
+TOKEN_RE = re.compile(r"\w+")
+
+
+@dataclass
+class RetrievalConfig:
+    exclude_recitals: bool = False
+    hybrid: bool = False
+    rerank: bool = False
+    candidates: int = 30  # pool size before fusion / reranking
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+def tokenize(text: str) -> list[str]:
+    return TOKEN_RE.findall(text.lower())
+
+
+class Retriever:
+    def __init__(self, embedder: Embedder, store: ChromaStore, config: RetrievalConfig):
+        self.embedder, self.store, self.config = embedder, store, config
+        self._chunks: list[Chunk] = []
+        self._bm25: BM25Okapi | None = None
+        self._reranker: CrossEncoder | None = None
+        if config.hybrid:
+            self._chunks = store.all_chunks()
+            if config.exclude_recitals:
+                self._chunks = [c for c in self._chunks if c.metadata["section"] != "Recitals"]
+            self._bm25 = BM25Okapi([tokenize(c.text) for c in self._chunks])
+        if config.rerank:
+            self._reranker = CrossEncoder(config.reranker_model)
+
+    def _dense(self, query: str, n: int) -> list[RetrievedChunk]:
+        flt = {"section": {"$ne": "Recitals"}} if self.config.exclude_recitals else None
+        return self.store.search(self.embedder.embed([query])[0], n, flt)
+
+    def _sparse(self, query: str, n: int) -> list[RetrievedChunk]:
+        scores = self._bm25.get_scores(tokenize(query))
+        top = sorted(range(len(scores)), key=scores.__getitem__, reverse=True)[:n]
+        return [RetrievedChunk(self._chunks[i], float(scores[i])) for i in top]
+
+    @staticmethod
+    def _rrf(lists: list[list[RetrievedChunk]]) -> list[RetrievedChunk]:
+        fused: dict[str, float] = {}
+        by_id: dict[str, Chunk] = {}
+        for ranked in lists:
+            for rank, rc in enumerate(ranked, 1):
+                fused[rc.chunk.id] = fused.get(rc.chunk.id, 0.0) + 1 / (RRF_K + rank)
+                by_id[rc.chunk.id] = rc.chunk
+        order = sorted(fused, key=fused.__getitem__, reverse=True)
+        return [RetrievedChunk(by_id[i], fused[i]) for i in order]
+
+    def retrieve(self, query: str, k: int) -> list[RetrievedChunk]:
+        pool = max(self.config.candidates, k)
+        results = self._dense(query, pool)
+        if self.config.hybrid:
+            results = self._rrf([results, self._sparse(query, pool)])
+        if self._reranker is not None:
+            scores = self._reranker.predict([(query, r.chunk.text) for r in results[:pool]])
+            ranked = sorted(zip(results[:pool], scores, strict=True), key=lambda p: -p[1])
+            results = [RetrievedChunk(r.chunk, float(s)) for r, s in ranked]
+        return results[:k]

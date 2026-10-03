@@ -5,6 +5,15 @@ from sentence_transformers import SentenceTransformer
 
 from app.providers.base import Chunk, RetrievedChunk
 
+DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def collection_name(embedding_model: str) -> str:
+    """One Chroma collection per embedding model, so vectors are never mixed."""
+    if embedding_model == DEFAULT_EMBEDDING:
+        return "regulations"
+    return "regulations_" + "".join(c if c.isalnum() else "_" for c in embedding_model.lower())
+
 
 class SentenceTransformerEmbedder:
     def __init__(self, model_name: str):
@@ -48,6 +57,14 @@ class ChromaStore:
 
     def delete_by_doc(self, doc_id: str) -> None:
         self._col.delete(where={"doc_id": doc_id})
+
+    def all_chunks(self) -> list[Chunk]:
+        res = self._col.get(include=["documents", "metadatas"])
+        out = []
+        for id_, doc, meta in zip(res["ids"], res["documents"], res["metadatas"], strict=True):
+            meta = dict(meta)
+            out.append(Chunk(id_, meta.pop("doc_id"), doc, meta))
+        return out
 
     def count(self) -> int:
         return self._col.count()

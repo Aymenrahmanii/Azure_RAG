@@ -7,6 +7,15 @@ Judge and generator are the same model (gpt-5.4-mini), so judge scores are optim
 | # | Label | Change | recall@5 | MRR | recital share | faithfulness | correctness | citation prec. | false refusals | correct abstention | p50 / p95 latency |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 0 | baseline | MiniLM embeddings, article-aware chunks (max 1500 chars), top-5 dense, strict "I don't know" prompt | 0.73 | 0.72 | 0.35 | 0.98 | 0.75 | 0.71 | 0.29 | 1.00 | 2.9 s / 11.0 s |
+| 1 | r1-no-recitals | + exclude recitals from retrieval | 0.78 | 0.81 | 0.00 | | | | | | |
+| 2 | r2-hybrid | dense + BM25 fused with RRF (recitals kept) | 0.74 | 0.72 | 0.39 | | | | | | |
+| 3 | r3-hybrid-no-recitals | hybrid + exclude recitals | 0.86 | 0.87 | 0.00 | | | | | | |
+| 4 | r4-hybrid-no-recitals-rerank | + cross-encoder rerank (ms-marco-MiniLM) of 30 candidates | 0.93 | 0.93 | 0.00 | | | | | | |
+| 5 | r5-bge-small | r4 with BAAI/bge-small-en-v1.5 embeddings | 0.94 | 0.95 | 0.00 | | | | | | |
+| 6 | r6-candidates-60 | r4 with 60 candidates | 0.93 | 0.94 | 0.00 | | | | | | |
+| 7 | g-strict | r5 retrieval + original strict prompt (zero-shot) | 0.94 | 0.95 | 0.00 | 1.00 | 0.83 | 0.94 | 0.12 | 1.00 | 3.5 s / 10.8 s |
+| 8 | g-balanced | r5 retrieval + "answer what is supported" prompt (zero-shot) | 0.94 | 0.95 | 0.00 | 0.99 | 0.88 | 0.91 | 0.00 | 0.89 | 4.5 s / 10.4 s |
+| 9 | **g-fewshot** | r5 retrieval + balanced prompt + 3 few-shot examples | 0.94 | 0.95 | 0.00 | 1.00 | 0.88 | 0.89 | 0.02 | 1.00 | 2.9 s / 10.3 s |
 
 ## Baseline findings (run 20261003-183218)
 
@@ -35,3 +44,22 @@ and Azure's built-in prompt shield blocked the "ignore previous instructions" at
 - A prompt-shield block on an answerable adversarial question (q45) counts as a false refusal. That is a real
   trade-off to discuss: the shield protects but can also block legitimate "ignore X" phrasing.
 - Section-level recall means any chunk of the right Article counts, even if it is the wrong paragraph.
+
+## Retrieval and prompt findings (runs 1-9)
+
+- **Retrieval, recall@5 0.73 -> 0.94.** No single change did it. Dropping recitals alone gave +0.05, hybrid alone
+  gave +0.01 (BM25 pulled in more recitals), but hybrid + no recitals gave +0.13, and the cross-encoder
+  reranker added +0.07 more. Components interact, so ablations must be run in combination.
+- **Bigger candidate pool (30 -> 60) and a stronger embedding model (MiniLM -> bge-small) were marginal**
+  (+0.00 / +0.01). Diminishing returns: stop tuning retrieval and look at what is left.
+- **Prompting, zero-shot vs few-shot.** The strict prompt over-refused (false refusals 0.12). The balanced
+  zero-shot prompt removed refusals but then answered one question it should have refused (correct abstention
+  1.00 -> 0.89). Three few-shot examples (a partial answer, a false-premise correction, a refusal) kept both:
+  false refusals 0.02 and abstention 1.00. Correctness 0.88 vs 0.83 for strict.
+- **Caveat: single runs, 50 questions, LLM judge.** Differences of ~0.05 are inside the noise. The retrieval gains
+  and the false-refusal/abstention trade-off are large enough to trust; strict vs few-shot correctness is not.
+- Recitals are excluded entirely. That is a deliberate trade-off: a question about legislative intent would
+  not find them. Revisit with a recital-specific route if needed.
+- Remaining weak spot: multi-article questions (recall@5 0.77): the answer spans 2-3 articles but top-5 slots
+  are taken by neighbouring chunks of the first article. Candidates: diversity (MMR), a larger k for
+  multi-part questions, or query decomposition (an agentic RAG use case).

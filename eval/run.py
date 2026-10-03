@@ -12,10 +12,12 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import settings
-from app.providers.local import ChromaStore, SentenceTransformerEmbedder
+from app.providers.local import ChromaStore, SentenceTransformerEmbedder, collection_name
 from app.providers.openai_compat import ContentFiltered, OpenAICompatLLM
 from app.rag import chunking
-from app.rag.pipeline import SYSTEM_PROMPT, build_prompt
+from app.rag.pipeline import build_prompt
+from app.rag.prompts import PROMPTS
+from app.rag.retrieval import RetrievalConfig, Retriever
 from eval.judge import judge
 from eval.metrics import (
     citation_precision,
@@ -45,12 +47,12 @@ def retrieval_metrics(row: dict, retrieved: list, k: int) -> dict:
     return out
 
 
-async def evaluate_row(row, retrieved, k, llm, sem):
+async def evaluate_row(row, retrieved, k, llm, sem, system_prompt):
     sources = retrieved[:k]
     async with sem:
         t0 = time.perf_counter()
         try:
-            answer = await llm.generate(SYSTEM_PROMPT, build_prompt(row["question"], sources))
+            answer = await llm.generate(system_prompt, build_prompt(row["question"], sources))
         except ContentFiltered:
             # Blocked by the provider's prompt shield before reaching the model: a refusal.
             ok = row["expected_behavior"] == "abstain"
@@ -155,21 +157,28 @@ async def main_async(args) -> None:
     dataset = [json.loads(line) for line in DATASET.read_text(encoding="utf-8").splitlines()]
     if args.limit:
         dataset = dataset[: args.limit]
-    embedder = SentenceTransformerEmbedder(settings.embedding_model)
-    store = ChromaStore(settings.chroma_path)
+    emb_model = args.embedding_model or settings.embedding_model
+    embedder = SentenceTransformerEmbedder(emb_model)
+    store = ChromaStore(settings.chroma_path, collection_name(emb_model))
+    retr_cfg = RetrievalConfig(
+        exclude_recitals=args.exclude_recitals,
+        hybrid=args.hybrid,
+        rerank=args.rerank,
+        candidates=args.candidates,
+    )
+    retriever = Retriever(embedder, store, retr_cfg)
     llm = None
     if not args.no_generate:
         llm = OpenAICompatLLM(settings.llm_base_url, settings.llm_model, settings.llm_api_key)
 
-    questions = [r["question"] for r in dataset]
-    qvecs = embedder.embed(questions)
-    retrieved_all = [store.search(v, max(args.k, max(K_VALUES))) for v in qvecs]
+    depth = max(args.k, max(K_VALUES))
+    retrieved_all = [retriever.retrieve(r["question"], depth) for r in dataset]
 
     sem = asyncio.Semaphore(args.concurrency)
     gen_results = [None] * len(dataset)
     if llm:
         tasks = [
-            evaluate_row(row, ret, args.k, llm, sem)
+            evaluate_row(row, ret, args.k, llm, sem, PROMPTS[args.prompt])
             for row, ret in zip(dataset, retrieved_all, strict=True)
         ]
         gen_results = await asyncio.gather(*tasks)
@@ -198,7 +207,9 @@ async def main_async(args) -> None:
     config = {
         "label": args.label,
         "k": args.k,
-        "embedding_model": settings.embedding_model,
+        "prompt": args.prompt,
+        "embedding_model": emb_model,
+        "retrieval": vars(retr_cfg),
         "llm_model": None if args.no_generate else settings.llm_model,
         "chunk_max_chars": chunking.MAX_CHARS,
         "n_chunks": store.count(),
@@ -218,6 +229,12 @@ def main() -> None:
     p.add_argument("--label", required=True)
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--no-generate", action="store_true")
+    p.add_argument("--prompt", choices=list(PROMPTS), default="strict")
+    p.add_argument("--embedding-model", default="")
+    p.add_argument("--exclude-recitals", action="store_true")
+    p.add_argument("--hybrid", action="store_true")
+    p.add_argument("--rerank", action="store_true")
+    p.add_argument("--candidates", type=int, default=30)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--concurrency", type=int, default=4)
     asyncio.run(main_async(p.parse_args()))
