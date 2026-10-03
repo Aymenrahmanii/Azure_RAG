@@ -13,6 +13,8 @@ dependencies = [
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
     "rank-bm25>=0.2.2",
+    "azure-identity>=1.17",
+    "azure-search-documents>=11.6",
 ]
 
 [project.optional-dependencies]

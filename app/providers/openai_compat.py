@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import httpx
 
@@ -22,13 +22,19 @@ class OpenAICompatLLM:
         timeout: float = 120,
         temperature: float | None = None,
         max_retries: int = 4,
+        token_provider: Callable[[], str] | None = None,
     ):
+        self._token_provider = token_provider  # Entra ID: fresh bearer token per request
         self._max_retries = max_retries
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._model = model
-        self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._api_key = api_key
         self._timeout = timeout
         self._temperature = temperature  # None = model default (GPT-5 family rejects 0)
+
+    def _headers(self) -> dict:
+        token = self._token_provider() if self._token_provider else self._api_key
+        return {"Authorization": f"Bearer {token}"} if token else {}
 
     def _payload(self, system: str, user: str, stream: bool) -> dict:
         payload = {
@@ -49,7 +55,7 @@ class OpenAICompatLLM:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             for attempt in range(self._max_retries + 1):
                 try:
-                    resp = await client.post(self._url, headers=self._headers, json=payload)
+                    resp = await client.post(self._url, headers=self._headers(), json=payload)
                 except httpx.TransportError:
                     if attempt == self._max_retries:
                         raise
@@ -67,7 +73,7 @@ class OpenAICompatLLM:
     async def stream(self, system: str, user: str) -> AsyncIterator[str]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             async with client.stream(
-                "POST", self._url, headers=self._headers, json=self._payload(system, user, True)
+                "POST", self._url, headers=self._headers(), json=self._payload(system, user, True)
             ) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():

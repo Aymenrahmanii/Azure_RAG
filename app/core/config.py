@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     chroma_path: str = ".chroma"
 
+    vector_store: str = "chroma"  # chroma | azure_search
+    llm_auth: str = "key"  # key | entra (DefaultAzureCredential, no secrets)
+
     # Any OpenAI-compatible chat endpoint (Ollama: http://localhost:11434/v1)
     llm_base_url: str = ""
     llm_model: str = ""
@@ -17,7 +20,7 @@ class Settings(BaseSettings):
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""
     azure_search_endpoint: str = ""
-    azure_search_index: str = ""
+    azure_search_index: str = ""  # empty = derived from the embedding model name
 
 
 settings = Settings()

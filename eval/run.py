@@ -12,8 +12,8 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import settings
-from app.providers.local import ChromaStore, SentenceTransformerEmbedder, collection_name
-from app.providers.openai_compat import ContentFiltered, OpenAICompatLLM
+from app.providers.factory import make_embedder, make_llm, make_store
+from app.providers.openai_compat import ContentFiltered
 from app.rag import chunking
 from app.rag.pipeline import build_prompt
 from app.rag.prompts import PROMPTS
@@ -158,8 +158,8 @@ async def main_async(args) -> None:
     if args.limit:
         dataset = dataset[: args.limit]
     emb_model = args.embedding_model or settings.embedding_model
-    embedder = SentenceTransformerEmbedder(emb_model)
-    store = ChromaStore(settings.chroma_path, collection_name(emb_model))
+    embedder = make_embedder(emb_model)
+    store = make_store(settings, embedder, emb_model)
     retr_cfg = RetrievalConfig(
         exclude_recitals=args.exclude_recitals,
         hybrid=args.hybrid,
@@ -169,7 +169,7 @@ async def main_async(args) -> None:
     retriever = Retriever(embedder, store, retr_cfg)
     llm = None
     if not args.no_generate:
-        llm = OpenAICompatLLM(settings.llm_base_url, settings.llm_model, settings.llm_api_key)
+        llm = make_llm(settings)
 
     depth = max(args.k, max(K_VALUES))
     retrieved_all = [retriever.retrieve(r["question"], depth) for r in dataset]
@@ -208,6 +208,8 @@ async def main_async(args) -> None:
         "label": args.label,
         "k": args.k,
         "prompt": args.prompt,
+        "vector_store": settings.vector_store,
+        "llm_auth": settings.llm_auth,
         "embedding_model": emb_model,
         "retrieval": vars(retr_cfg),
         "llm_model": None if args.no_generate else settings.llm_model,
