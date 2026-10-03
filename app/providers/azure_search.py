@@ -131,6 +131,17 @@ class AzureSearchStore:
         for i in range(0, len(keys), BATCH):
             self._client.delete_documents(keys[i : i + BATCH])
 
+    def chunk_ids_for_doc(self, doc_id: str) -> list[str]:
+        hits = self._client.search(
+            search_text="*", filter=odata_filter({"doc_id": doc_id}), select=["chunk_id"]
+        )
+        return [h["chunk_id"] for h in hits]
+
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        keys = [{"id": search_key(c)} for c in chunk_ids]
+        for i in range(0, len(keys), BATCH):
+            self._client.delete_documents(keys[i : i + BATCH])
+
     def all_chunks(self) -> list[Chunk]:
         hits = self._client.search(
             search_text="*", select=["chunk_id", "doc_id", "text", *META_FIELDS]

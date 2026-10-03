@@ -158,7 +158,7 @@ async def main_async(args) -> None:
     if args.limit:
         dataset = dataset[: args.limit]
     emb_model = args.embedding_model or settings.embedding_model
-    embedder = make_embedder(emb_model)
+    embedder = make_embedder(emb_model, settings)
     store = make_store(settings, embedder, emb_model)
     retr_cfg = RetrievalConfig(
         exclude_recitals=args.exclude_recitals,

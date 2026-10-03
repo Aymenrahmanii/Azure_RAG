@@ -4,15 +4,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 
 from app.providers.base import Chunk, RetrievedChunk
-
-DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
-
-
-def collection_name(embedding_model: str) -> str:
-    """One Chroma collection per embedding model, so vectors are never mixed."""
-    if embedding_model == DEFAULT_EMBEDDING:
-        return "regulations"
-    return "regulations_" + "".join(c if c.isalnum() else "_" for c in embedding_model.lower())
+from app.providers.naming import collection_name  # noqa: F401  (re-export)
 
 
 class SentenceTransformerEmbedder:
@@ -57,6 +49,13 @@ class ChromaStore:
 
     def delete_by_doc(self, doc_id: str) -> None:
         self._col.delete(where={"doc_id": doc_id})
+
+    def chunk_ids_for_doc(self, doc_id: str) -> list[str]:
+        return self._col.get(where={"doc_id": doc_id}, include=[])["ids"]
+
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        if chunk_ids:
+            self._col.delete(ids=chunk_ids)
 
     def all_chunks(self) -> list[Chunk]:
         res = self._col.get(include=["documents", "metadatas"])

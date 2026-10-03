@@ -14,7 +14,7 @@ RAW = Path("data/raw")
 
 
 def ingest(embedding_model: str) -> None:
-    embedder = make_embedder(embedding_model)
+    embedder = make_embedder(embedding_model, settings)
     store = make_store(settings, embedder, embedding_model)
     for path in sorted(RAW.glob("*.txt")):
         chunks = chunk_document(path.stem, path.read_text(encoding="utf-8"))
@@ -26,7 +26,7 @@ def ingest(embedding_model: str) -> None:
 
 def ask(question: str, k: int) -> None:
     llm = make_llm(settings)
-    embedder = make_embedder(settings.embedding_model)
+    embedder = make_embedder(settings.embedding_model, settings)
     store = make_store(settings, embedder, settings.embedding_model)
     # Best retrieval config from experiments: hybrid + no recitals + cross-encoder rerank.
     retriever = Retriever(embedder, store, RetrievalConfig(True, True, True))

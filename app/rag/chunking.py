@@ -62,6 +62,8 @@ def split_sections(text: str) -> list[Section]:
         current.paragraphs.append(line)
         i += 1
     sections.append(current)
+    if len(sections) == 1:  # no Article/Annex headings: a generic document, not a regulation
+        sections[0].label = "Document"
 
     # A label can appear twice (table of contents, cross-reference line): keep the longest.
     best: dict[str, Section] = {}
