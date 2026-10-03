@@ -1,0 +1,35 @@
+# Secrets (repo is public: never commit these)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.tfvars
+!example.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+local.settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Data and local stores
+data/raw/
+data/processed/
+.chroma/
+*.faiss
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
