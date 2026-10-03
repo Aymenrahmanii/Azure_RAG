@@ -36,7 +36,11 @@ class ChromaStore:
         res = self._col.query(query_embeddings=[query_embedding], n_results=k, where=filters)
         out = []
         for id_, doc, meta, dist in zip(
-            res["ids"][0], res["documents"][0], res["metadatas"][0], res["distances"][0]
+            res["ids"][0],
+            res["documents"][0],
+            res["metadatas"][0],
+            res["distances"][0],
+            strict=True,
         ):
             doc_id = meta.pop("doc_id")
             out.append(RetrievedChunk(Chunk(id_, doc_id, doc, meta), score=1 - dist))

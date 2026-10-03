@@ -8,7 +8,8 @@ from pathlib import Path
 import httpx
 from bs4 import BeautifulSoup
 
-# CELEX ids, fetched from the EU Publications Office API (EUR-Lex blocks scripts with a 202 challenge)
+# CELEX ids, fetched from the EU Publications Office API
+# (EUR-Lex itself answers scripts with a 202 bot challenge)
 SOURCES = {
     "gdpr": "32016R0679",
     "eu_ai_act": "32024R1689",

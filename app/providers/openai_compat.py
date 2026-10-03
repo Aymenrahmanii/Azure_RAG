@@ -1,4 +1,4 @@
-"""LLM provider for any OpenAI-compatible chat endpoint (Ollama, OpenAI, Azure OpenAI /openai/v1)."""
+"""LLM provider for any OpenAI-compatible chat endpoint (Ollama, OpenAI, Azure OpenAI)."""
 
 import json
 from collections.abc import AsyncIterator
