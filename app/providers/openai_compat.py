@@ -7,22 +7,32 @@ import httpx
 
 
 class OpenAICompatLLM:
-    def __init__(self, base_url: str, model: str, api_key: str = "", timeout: float = 120):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str = "",
+        timeout: float = 120,
+        temperature: float | None = None,
+    ):
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._model = model
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._timeout = timeout
+        self._temperature = temperature  # None = model default (GPT-5 family rejects 0)
 
     def _payload(self, system: str, user: str, stream: bool) -> dict:
-        return {
+        payload = {
             "model": self._model,
-            "temperature": 0,
             "stream": stream,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
         }
+        if self._temperature is not None:
+            payload["temperature"] = self._temperature
+        return payload
 
     async def generate(self, system: str, user: str) -> str:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
