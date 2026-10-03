@@ -25,4 +25,8 @@ provider "azurerm" {
     }
   }
   subscription_id = var.subscription_id
+
+  # Providers are registered once with `az provider register` (see infra/README.md); least privilege.
+  resource_provider_registrations = "none"
 }
+

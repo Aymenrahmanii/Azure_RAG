@@ -5,6 +5,13 @@ Log Analytics (0.5 GB/day cap), Application Insights, Container Apps environment
 managed identity, and least-privilege role assignments for that identity and for the developer.
 The Foundry / Azure OpenAI resource already exists and is only referenced.
 
+## One-time: register resource providers
+
+Terraform is configured not to register providers itself (it needs broad rights and failed on a student
+subscription). Register what is needed once: `az provider register -n Microsoft.App --wait`
+(others used here: Storage, KeyVault, Search, OperationalInsights, Insights, ManagedIdentity, Authorization,
+CognitiveServices; usually already registered).
+
 ## Use
 
 ```powershell
