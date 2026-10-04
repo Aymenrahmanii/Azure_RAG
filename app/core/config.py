@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     retrieval_hybrid: bool = True
     retrieval_rerank: bool = False
 
+    # Security. auth_mode "off" is only allowed when environment == "local" (the API refuses to
+    # start otherwise). Tokens are checked against a static public key OR an Entra JWKS URL.
+    auth_mode: str = "off"  # off | jwt
+    auth_issuer: str = ""
+    auth_audience: str = ""
+    auth_public_key: str = ""  # PEM (newlines may be written as \n)
+    auth_jwks_url: str = ""
+    acl_restricted: str = ""  # JSON, e.g. {"dora": ["finance"]}: sources only these groups may read
+    rate_limit_per_minute: int = 20  # per user; 0 disables
+    audit_salt: str = ""  # salts the user/question hashes in the audit log
+
     azure_openai_endpoint: str = ""
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""

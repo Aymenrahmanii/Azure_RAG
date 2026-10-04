@@ -16,6 +16,7 @@ from app.providers.base import Chunk, Embedder, LLMProvider, RetrievedChunk
 from app.providers.openai_compat import ContentFiltered
 from app.rag.pipeline import Answer, build_prompt
 from app.rag.retrieval import Retriever, tokenize
+from app.security.access import is_visible, section_visible
 
 GLOBAL_SYSTEM = """You are an EU regulatory compliance assistant answering a broad question.
 Use ONLY the numbered topic summaries below; each lists the sections it draws on. Cite every
@@ -61,7 +62,11 @@ class GraphRetriever:
                     continue
                 for t in self.graph.sections_of(e):
                     scores[t] += cfg.entity_weight * w * idf
-        ranked = [(s, v) for s, v in scores.items() if s in self._by_section and s not in exclude]
+        ranked = [
+            (s, v)
+            for s, v in scores.items()
+            if s in self._by_section and s not in exclude and section_visible(s)
+        ]
         return sorted(ranked, key=lambda kv: -kv[1])
 
     def retrieve(self, query: str, k: int) -> list[RetrievedChunk]:
@@ -93,6 +98,12 @@ class GlobalSearch:
     ):
         self.llm, self.top, self.embedder = llm, top_communities, embedder
         self.communities = [c for c in graph.communities() if c.get("summary")]
+        # Every source a community draws on. A summary mixes its sources, so it is shown only to
+        # callers who may read all of them.
+        self._sources = [
+            {sec.split(":", 1)[0] for e in c["entities"] for sec in graph.sections_of(e)}
+            for c in self.communities
+        ]
         docs = [
             tokenize(f"{c['title']} {c['summary']} {' '.join(c['entities'])}")
             for c in self.communities
@@ -119,7 +130,7 @@ class GlobalSearch:
                     rrf[i] += 1 / (60 + rank)
             scores = [rrf[i] for i in range(len(scores))]
             order = sorted(range(len(scores)), key=scores.__getitem__, reverse=True)
-        order = order[: self.top]
+        order = [i for i in order if all(is_visible(src) for src in self._sources[i])][: self.top]
         out = []
         for i in order:
             c = self.communities[i]

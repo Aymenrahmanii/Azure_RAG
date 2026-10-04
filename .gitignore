@@ -34,3 +34,6 @@ data/processed/
 .idea/
 .DS_Store
 *.tfplan
+
+# Token signing keys (private key must never be committed)
+.keys/

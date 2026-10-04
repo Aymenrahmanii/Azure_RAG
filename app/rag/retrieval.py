@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from rank_bm25 import BM25Okapi
 
 from app.providers.base import Chunk, Embedder, RetrievedChunk, VectorStore
+from app.security.access import visible
 
 RRF_K = 60
 TOKEN_RE = re.compile(r"\w+")
@@ -51,12 +52,22 @@ class Retriever:
         return self._bm25.get_scores(tokenize(query))
 
     def _dense(self, query: str, n: int) -> list[RetrievedChunk]:
-        flt = {"section": {"$ne": "Recitals"}} if self.config.exclude_recitals else None
-        return self.store.search(self.embedder.embed([query])[0], n, flt)
+        flt: dict = {}
+        if self.config.exclude_recitals:
+            flt["section"] = {"$ne": "Recitals"}
+        if (allowed := visible()) is not None:  # security trimming, enforced inside the index query
+            flt["source"] = {"$in": sorted(allowed)}
+        return self.store.search(self.embedder.embed([query])[0], n, flt or None)
 
     def _sparse(self, query: str, n: int) -> list[RetrievedChunk]:
         scores = self._bm25.get_scores(tokenize(query))
-        top = sorted(range(len(scores)), key=scores.__getitem__, reverse=True)[:n]
+        allowed = visible()
+        candidates = [
+            i
+            for i in range(len(scores))
+            if allowed is None or self._chunks[i].metadata["source"] in allowed
+        ]
+        top = sorted(candidates, key=scores.__getitem__, reverse=True)[:n]
         return [RetrievedChunk(self._chunks[i], float(scores[i])) for i in top]
 
     @staticmethod

@@ -63,3 +63,17 @@ Raise them after a verified improvement. Lower them only with a written reason i
   rollout; the single-revision mode with health probes and automatic rollback was chosen for simplicity.
 - A separate dev and prod environment: there is one Azure environment, and "production" is the approval gate.
 - Pinning third-party actions to commit SHAs (they use major-version tags).
+
+## Optional: authenticated smoke test
+
+The API requires a token, so the deploy smoke test always checks that a request without one is rejected (401).
+To also check a real answer after each deploy, mint a token for a user with no groups and store it as the
+repository **secret** `SMOKE_TOKEN`:
+
+```
+python -m app.security.mint mint --key .keys/private.pem --issuer https://azrag.dev \
+    --audience azrag-api --sub ci-smoke --groups "" --ttl-hours 720
+```
+
+It expires after 30 days (then the step fails loudly, which is the reminder to mint a new one). The private
+key itself must never go into GitHub.

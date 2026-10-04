@@ -22,10 +22,15 @@ MODES = {
 }
 
 
-def stream_chat(question: str, k: int, mode: str):
+def stream_chat(question: str, k: int, mode: str, token: str):
     """Yield (event, data) pairs from the API's Server-Sent Events stream."""
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     with httpx.stream(
-        "POST", f"{API_URL}/chat", json={"question": question, "k": k, "mode": mode}, timeout=120
+        "POST",
+        f"{API_URL}/chat",
+        json={"question": question, "k": k, "mode": mode},
+        headers=headers,
+        timeout=120,
     ) as resp:
         resp.raise_for_status()
         event = None
@@ -45,6 +50,10 @@ def show_sources(sources: list[dict]) -> None:
 
 mode = MODES[st.sidebar.selectbox("Pipeline", list(MODES))]
 k = st.sidebar.slider("Passages for baseline / graph (k)", 1, 10, 7)
+# The API needs a bearer token (docs/security.md). Never stored: it lives in this session only.
+token = st.sidebar.text_input(
+    "Access token", type="password", value=os.environ.get("API_TOKEN", "")
+)
 
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -64,7 +73,7 @@ if question := st.chat_input("Ask about GDPR, the AI Act, NIS2 or DORA"):
         status = st.status("Working...", expanded=True)
         placeholder, text, sources = st.empty(), "", []
         try:
-            for event, data in stream_chat(question, k, mode):
+            for event, data in stream_chat(question, k, mode, token):
                 if event == "route":
                     label = data["pipeline"] + (
                         f" (classified as {data['kind']})" if data["kind"] else ""
@@ -92,6 +101,14 @@ if question := st.chat_input("Ask about GDPR, the AI Act, NIS2 or DORA"):
             placeholder.markdown(text)
             if sources:
                 show_sources(sources)
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            text = {
+                401: "Access token missing, invalid or expired. Paste a valid one in the sidebar.",
+                429: "Too many requests. Wait a moment and try again.",
+            }.get(code, f"The API returned an error ({code}).")
+            status.update(label="Failed", state="error")
+            placeholder.error(text)
         except httpx.HTTPError as exc:
             text = f"Could not reach the API ({exc.__class__.__name__})."
             status.update(label="Failed", state="error")

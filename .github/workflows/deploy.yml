@@ -70,27 +70,43 @@ jobs:
           az containerapp update -g "$RESOURCE_GROUP" -n "$UI_APP" \
             --image "$REGISTRY.azurecr.io/azrag-ui:${GITHUB_SHA}" -o none
 
-      - name: Wait for the new API revision to be ready
+      # In single-revision mode `latestReadyRevisionName` stays empty, so look at the revision that
+      # runs the new image instead (checked by hand against the live app).
+      - name: Wait for the new API revision to be healthy
         run: |
+          img="$REGISTRY.azurecr.io/azrag-api:${GITHUB_SHA}"
           for i in $(seq 1 40); do
-            read -r latest ready < <(az containerapp show -g "$RESOURCE_GROUP" -n "$API_APP" \
-              --query "[properties.latestRevisionName, properties.latestReadyRevisionName]" -o tsv)
-            echo "latest=$latest ready=$ready"
-            [ "$latest" = "$ready" ] && exit 0
+            state=$(az containerapp revision list -g "$RESOURCE_GROUP" -n "$API_APP" \
+              --query "[?properties.template.containers[0].image=='$img'] | [0].[properties.healthState, properties.runningState]" \
+              -o tsv | tr '\r\n\t' '   ' | xargs)
+            echo "revision state: ${state:-none yet}"
+            [ "$state" = "Healthy Running" ] && exit 0
             sleep 15
           done
-          echo "new revision never became ready"; exit 1
+          echo "the new revision never became healthy"; exit 1
 
       - name: Smoke test
+        env:
+          # Optional: a long-lived token for a user with no groups (minted offline, see docs/security.md)
+          SMOKE_TOKEN: ${{ secrets.SMOKE_TOKEN }}
         run: |
           fqdn=$(az containerapp show -g "$RESOURCE_GROUP" -n "$API_APP" \
             --query properties.configuration.ingress.fqdn -o tsv)
           curl -sf --retry 10 --retry-delay 10 --retry-all-errors "https://$fqdn/healthz"
           echo
-          body=$(curl -sf -m 120 -X POST "https://$fqdn/chat" -H "content-type: application/json" \
-            -d '{"question":"How long does a controller have to notify a personal data breach?","mode":"baseline"}')
-          echo "$body" | grep -q "^event: done" || { echo "no done event"; echo "$body"; exit 1; }
-          echo "$body" | grep -q "72 hours" || { echo "answer does not mention 72 hours"; exit 1; }
+          # authentication must be enforced: no token, no answer
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://$fqdn/chat" \
+            -H "content-type: application/json" -d '{"question":"x","mode":"baseline"}')
+          [ "$code" = "401" ] || { echo "expected 401 without a token, got $code"; exit 1; }
+          if [ -n "$SMOKE_TOKEN" ]; then
+            body=$(curl -sf -m 120 -X POST "https://$fqdn/chat" \
+              -H "content-type: application/json" -H "Authorization: Bearer $SMOKE_TOKEN" \
+              -d '{"question":"How long does a controller have to notify a personal data breach?","mode":"baseline"}')
+            echo "$body" | grep -q "^event: done" || { echo "no done event"; echo "$body"; exit 1; }
+            echo "$body" | grep -q "72 hours" || { echo "answer does not mention 72 hours"; exit 1; }
+          else
+            echo "SMOKE_TOKEN not set: skipped the authenticated check"
+          fi
 
       - name: Roll back
         if: failure()

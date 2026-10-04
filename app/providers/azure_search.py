@@ -30,11 +30,21 @@ def search_key(chunk_id: str) -> str:
 
 
 def odata_filter(filters: dict | None) -> str | None:
-    """Translate the store-agnostic filter dict ({"f": v} or {"f": {"$ne": v}}) to OData."""
+    """Translate the store-agnostic filter dict to OData. Per field the condition is a plain value
+    (equals), {"$ne": v} (not equals) or {"$in": [v, ...]} (one of)."""
     if not filters:
         return None
     parts = []
     for field, cond in filters.items():
+        if isinstance(cond, dict) and "$in" in cond:
+            values = list(cond["$in"])
+            if any("," in str(v) or "'" in str(v) for v in values):
+                raise ValueError("$in values must not contain commas or quotes")
+            # empty list -> a condition nothing satisfies, never "no filter"
+            parts.append(
+                f"search.in({field}, '{','.join(map(str, values))}', ',')" if values else "false"
+            )
+            continue
         op, value = ("ne", cond["$ne"]) if isinstance(cond, dict) else ("eq", cond)
         parts.append(f"{field} {op} '{str(value).replace(chr(39), chr(39) * 2)}'")
     return " and ".join(parts)

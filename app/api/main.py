@@ -12,14 +12,15 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.graph.loader import load_graph
 from app.graph.search import GlobalSearch, GraphConfig, GraphRetriever
 from app.providers.factory import make_embedder, make_llm, make_store
@@ -28,6 +29,10 @@ from app.rag.agent import Agent
 from app.rag.pipeline import RAGPipeline
 from app.rag.retrieval import RetrievalConfig, Retriever
 from app.rag.router import PipelineRunner, Router
+from app.security import audit
+from app.security.access import AccessPolicy, reset_visible, set_visible
+from app.security.auth import TokenError, TokenVerifier, User
+from app.security.ratelimit import SlidingWindowLimiter
 
 log = logging.getLogger("api")
 Mode = Literal["auto", "baseline", "graph", "agent", "global"]
@@ -46,6 +51,11 @@ class Services:
     graph: RAGPipeline | None = None
     agent: Agent | None = None
     global_search: GlobalSearch | None = None
+    auth: TokenVerifier | None = None  # None only in local development
+    policy: AccessPolicy = field(default_factory=AccessPolicy)
+    limiter: SlidingWindowLimiter = field(default_factory=lambda: SlidingWindowLimiter(0))
+    all_sources: frozenset[str] = frozenset()
+    audit_salt: str = ""
 
     def available(self) -> list[str]:
         have = {
@@ -57,24 +67,52 @@ class Services:
         return [name for name, svc in have.items() if svc is not None]
 
 
+def security_from_settings(
+    cfg: Settings,
+) -> tuple[TokenVerifier | None, AccessPolicy, SlidingWindowLimiter]:
+    """Fails closed: outside `local`, running without authentication is a startup error."""
+    if cfg.auth_mode == "jwt":
+        auth = TokenVerifier(
+            cfg.auth_issuer, cfg.auth_audience, cfg.auth_public_key, cfg.auth_jwks_url
+        )
+    elif cfg.environment == "local":
+        auth = None
+    else:
+        raise RuntimeError(
+            f"AUTH_MODE=jwt is required when ENVIRONMENT={cfg.environment!r}; refusing to start"
+        )
+    policy = AccessPolicy.from_json(cfg.acl_restricted)
+    if policy.restricted and auth is None:
+        raise RuntimeError("ACL_RESTRICTED is set but authentication is off: it cannot be enforced")
+    return auth, policy, SlidingWindowLimiter(cfg.rate_limit_per_minute)
+
+
 def build_services() -> Services:
+    auth, policy, limiter = security_from_settings(settings)
     embedder = make_embedder(settings.embedding_model, settings)
     store = make_store(settings, embedder, settings.embedding_model)
     config = RetrievalConfig(
         exclude_recitals=True, hybrid=settings.retrieval_hybrid, rerank=settings.retrieval_rerank
     )
     retriever = Retriever(embedder, store, config)
+    sec = {
+        "auth": auth,
+        "policy": policy,
+        "limiter": limiter,
+        "all_sources": frozenset(c.metadata["source"] for c in retriever.chunks),
+        "audit_salt": settings.audit_salt,
+    }
     llm = make_llm(settings)
     baseline = RAGPipeline(retriever, llm)
     graph = load_graph(settings)
     if graph is None or llm is None:
         log.warning("running without graph features (graph=%s, llm=%s)", graph, llm)
-        return Services(baseline, Router(llm, {"baseline": PipelineRunner(baseline, 7)}))
+        return Services(baseline, Router(llm, {"baseline": PipelineRunner(baseline, 7)}), **sec)
     graph_pipeline = RAGPipeline(GraphRetriever(retriever, graph, GraphConfig(n_graph=2)), llm)
     agent = Agent(llm, retriever, graph)
     global_search = GlobalSearch(llm, graph, embedder=embedder) if graph.communities() else None
     runners = {"baseline": PipelineRunner(baseline, 7), "agent": agent}
-    return Services(baseline, Router(llm, runners), graph_pipeline, agent, global_search)
+    return Services(baseline, Router(llm, runners), graph_pipeline, agent, global_search, **sec)
 
 
 @asynccontextmanager
@@ -108,13 +146,42 @@ def sources_event(sources) -> str:
     return sse("sources", [source_dict(i, rc) for i, rc in enumerate(sources, 1)])
 
 
+DEV_USER = User("dev", frozenset({"dev"}))  # only reachable with AUTH_MODE=off, i.e. local
+bearer = HTTPBearer(auto_error=False)
+
+
+async def current_user(
+    request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer)
+) -> User:
+    svc: Services = request.app.state.services
+    if svc.auth is None:
+        return DEV_USER
+    challenge = {"WWW-Authenticate": "Bearer"}
+    if creds is None:
+        raise HTTPException(401, "authentication required", headers=challenge)
+    try:
+        return svc.auth.verify(creds.credentials)
+    except TokenError as exc:
+        log.warning("rejected token: %s", exc)  # the reason stays in the log, not in the response
+        raise HTTPException(401, "invalid or expired token", headers=challenge) from exc
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'")
+    return response
+
+
 @app.get("/healthz")
 async def healthz() -> dict:
     return {"status": "ok"}
 
 
 @app.get("/pipelines")
-async def pipelines(request: Request) -> dict:
+async def pipelines(request: Request, user: User = Depends(current_user)) -> dict:
     return {"available": request.app.state.services.available()}
 
 
@@ -128,13 +195,30 @@ async def choose(svc: Services, body: ChatRequest) -> tuple[str, str | None]:
 
 
 @app.post("/chat")
-async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
+async def chat(
+    body: ChatRequest, request: Request, user: User = Depends(current_user)
+) -> StreamingResponse:
     svc: Services = request.app.state.services
+    allowed, retry_after = svc.limiter.check(user.id)
+    if not allowed:
+        audit.record(
+            user_id=user.id, question=body.question, status="rate_limited", salt=svc.audit_salt
+        )
+        raise HTTPException(
+            429, "rate limit exceeded", headers={"Retry-After": str(int(retry_after) + 1)}
+        )
 
     async def events():
         start, first_token = time.perf_counter(), None
         meter = Usage()
         usage_var.set(meter)  # everything this request spends on the LLM is counted here
+        # Security trimming: which documents this caller may see, for every retrieval path below.
+        visible_token = set_visible(
+            svc.policy.visible_sources(user.groups, svc.all_sources) if svc.auth else None
+        )
+        name = kind = None
+        returned: list = []
+        status = "ok"
         try:
             name, kind = await choose(svc, body)
             yield sse("route", {"pipeline": name, "kind": kind})
@@ -143,6 +227,7 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
                 pipeline = svc.graph if name == "graph" else svc.baseline
                 async for what, value in pipeline.stream(body.question, body.k):
                     if what == "sources":
+                        returned = value
                         yield sources_event(value)
                     else:
                         first_token = first_token or time.perf_counter() - start
@@ -170,6 +255,7 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
                         },
                     )
                 answer = await work
+                returned = answer.sources
                 yield sources_event(answer.sources)
                 first_token = time.perf_counter() - start
                 yield sse("token", answer.text)
@@ -182,8 +268,26 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
             }
             yield sse("done", done)
         except Exception:
+            status = "error"
             log.exception("chat failed")
             yield sse("error", {"message": "The assistant failed to answer. Try again."})
+        finally:
+            audit.record(
+                user_id=user.id,
+                question=body.question,
+                status=status,
+                pipeline=name,
+                kind=kind,
+                sections=[
+                    f"{r.chunk.metadata.get('source')}:{r.chunk.metadata.get('section')}"
+                    for r in returned
+                ],
+                tokens=meter.prompt_tokens + meter.completion_tokens,
+                llm_calls=meter.calls,
+                seconds=time.perf_counter() - start,
+                salt=svc.audit_salt,
+            )
+            reset_visible(visible_token)
 
     # no-cache + X-Accel-Buffering stop proxies from buffering the stream into one blob
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}

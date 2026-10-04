@@ -22,6 +22,43 @@ variable "api_max_replicas" {
   default     = 3
 }
 
+# ---- API security (docs/security.md) ------------------------------------------------------------
+# The tenant forbids app registrations, so tokens are self-issued (python -m app.security.mint) and
+# the API only holds the PUBLIC key. Moving to Entra ID later means AUTH_JWKS_URL instead of a key.
+
+variable "auth_issuer" {
+  type    = string
+  default = "https://azrag.dev"
+}
+
+variable "auth_audience" {
+  type    = string
+  default = "azrag-api"
+}
+
+variable "auth_public_key" {
+  description = "PEM public key that verifies access tokens (not a secret). Set in a git-ignored tfvars file."
+  type        = string
+  default     = ""
+}
+
+variable "acl_restricted" {
+  description = "JSON map of source -> groups allowed to read it, e.g. {\"dora\":[\"finance\"]}. Empty = all sources open to any authenticated user."
+  type        = string
+  default     = ""
+}
+
+variable "rate_limit_per_minute" {
+  type    = number
+  default = 20
+}
+
+# Salts the hashes in the audit log. Lives in Terraform state and a Container Apps secret only.
+resource "random_password" "audit_salt" {
+  length  = 32
+  special = false
+}
+
 resource "azurerm_container_registry" "main" {
   name                = "acr${var.project}${var.environment}${local.suffix}"
   resource_group_name = azurerm_resource_group.main.name
@@ -54,6 +91,11 @@ resource "azurerm_container_app" "api" {
   registry {
     server   = azurerm_container_registry.main.login_server
     identity = azurerm_user_assigned_identity.app.id
+  }
+
+  secret {
+    name  = "audit-salt"
+    value = random_password.audit_salt.result
   }
 
   ingress {
@@ -125,6 +167,34 @@ resource "azurerm_container_app" "api" {
         name  = "GRAPH_CONTAINER"
         value = azurerm_storage_container.graph.name
       }
+      env {
+        name  = "AUTH_MODE"
+        value = "jwt"
+      }
+      env {
+        name  = "AUTH_ISSUER"
+        value = var.auth_issuer
+      }
+      env {
+        name  = "AUTH_AUDIENCE"
+        value = var.auth_audience
+      }
+      env {
+        name  = "AUTH_PUBLIC_KEY"
+        value = replace(var.auth_public_key, "\n", "\\n") # one line; the API restores the newlines
+      }
+      env {
+        name  = "ACL_RESTRICTED"
+        value = var.acl_restricted
+      }
+      env {
+        name  = "RATE_LIMIT_PER_MINUTE"
+        value = tostring(var.rate_limit_per_minute)
+      }
+      env {
+        name        = "AUDIT_SALT"
+        secret_name = "audit-salt"
+      }
 
       startup_probe {
         transport = "HTTP"
@@ -147,6 +217,11 @@ resource "azurerm_container_app" "api" {
   lifecycle {
     # CI/CD rolls out new images (az containerapp update). Terraform owns everything else.
     ignore_changes = [template[0].container[0].image]
+
+    precondition {
+      condition     = var.auth_public_key != ""
+      error_message = "auth_public_key is required: the API refuses to start without authentication."
+    }
   }
 }
 

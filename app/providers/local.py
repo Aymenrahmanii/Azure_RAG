@@ -34,7 +34,11 @@ class ChromaStore:
     def search(
         self, query_embedding: list[float], k: int, filters: dict | None = None
     ) -> list[RetrievedChunk]:
-        res = self._col.query(query_embeddings=[query_embedding], n_results=k, where=filters)
+        where = None
+        if filters:
+            conds = [{f: c} for f, c in filters.items()]
+            where = conds[0] if len(conds) == 1 else {"$and": conds}
+        res = self._col.query(query_embeddings=[query_embedding], n_results=k, where=where)
         out = []
         for id_, doc, meta, dist in zip(
             res["ids"][0],

@@ -16,6 +16,7 @@ from app.providers.openai_compat import ContentFiltered, Usage, usage_var
 from app.rag.pipeline import Answer
 from app.rag.prompts import REFUSAL
 from app.rag.retrieval import Retriever
+from app.security.access import is_visible, section_visible
 
 SOURCES = {"gdpr": "GDPR", "eu_ai_act": "EU AI Act", "nis2": "NIS2 Directive", "dora": "DORA"}
 
@@ -158,7 +159,11 @@ class Agent:
         return self._render(ev, rcs)
 
     async def _get_section(self, ev: Evidence, source: str, section: str) -> tuple[str, int]:
-        chunks = self._by_section.get(section_key(source, section.strip()))
+        chunks = (
+            self._by_section.get(section_key(source, section.strip()))
+            if is_visible(source)
+            else None
+        )  # a restricted section answers exactly like a missing one: no existence leak
         if not chunks:
             return (
                 f"No section '{section}' in '{source}'. Use labels like 'Article 33', 'Annex III'.",
@@ -170,7 +175,10 @@ class Agent:
         if self.graph is None:
             return "The citation graph is not available; use search instead.", 0
         key = section_key(source, section.strip())
-        cites, cited_by = self.graph.references(key), self.graph.referenced_by(key)
+        if not is_visible(source):
+            return f"No section '{section}' in '{source}'.", 0
+        cites = [s for s in self.graph.references(key) if section_visible(s)]
+        cited_by = [s for s in self.graph.referenced_by(key) if section_visible(s)]
         return (
             f"{key} cites: {', '.join(cites[:15]) or 'nothing'}.\n"
             f"{key} is cited by: {', '.join(cited_by[:15]) or 'nothing'}.",
