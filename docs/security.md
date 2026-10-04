@@ -13,6 +13,9 @@ What protects the API, how each control was checked, and what is still missing.
 | One user draining the budget | Per-user sliding-window rate limit (429 + `Retry-After`) | tests; limit is per replica (see limits) |
 | Personal data leaking into logs | The audit log never contains question or answer text, only a salted hash of the user id, the question length and a hash of the question | tests assert an IBAN in a question and an email in the user id never reach the log |
 | Missing accountability | One structured audit line per request: user hash, pipeline, sections returned, tokens, latency, status | `app/security/audit.py` |
+| Personal data pasted into questions | `redact_pii` masks emails, IBANs (mod-97 checked), cards (Luhn), international phone numbers and IPv4 addresses before search, the LLM or the logs; the user gets a `notice` event and the audit entry records only kinds and counts | `tests/test_pii.py` (masks, and leaves article numbers, dates and checksum-failing numbers alone), `tests/test_api_hardening.py` |
+| Data leaving through rendered answers (markdown image or link smuggled in by a poisoned passage) | Answers and the source text shown to users pass a stream-safe sanitiser: images removed, links reduced to their text, raw HTML removed, brackets other than numeric citations unwrapped (which also defeats reference-style links) | `tests/test_sanitize.py`: every possible split of the stream, nested brackets, reference-style images; `eval.injection` measured 0 surviving exfiltration URLs |
+| Poisoned documents entering the index | Ingestion scans each upload for injected instructions, text addressed to an AI system, exfiltration markup and invisible/bidi characters; a flagged file is quarantined (status `quarantined`, reasons recorded) and a previously indexed clean version stays in place | `tests/test_injection_scan.py`, including a check that the four real regulations produce zero findings |
 | Browser-side attacks on API responses | `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy: default-src 'none'` | live check |
 | Secrets in code or images | No keys anywhere: managed identity for Azure services; only the **public** token key is deployed; the audit salt is a generated Container Apps secret | `.gitignore` (`.keys/`), Terraform |
 
@@ -58,5 +61,17 @@ all four regulations are public; the mechanism is tested and switched on by sett
 - The UI takes a pasted token; there is no login flow.
 - Network: the API is public (HTTPS) behind token authentication. Private endpoints for AI Search, Azure
   OpenAI and Storage need a VNet-integrated environment and a paid tier of some services.
-- Prompt-injection defences beyond the system prompt and Azure's content filter, and PII redaction of
-  question text, are the next slice (see PLAN.md, phase 9).
+- PII masking is regex plus checksums: it does not find names or free-form identifiers, and local phone
+  numbers without an international prefix are left alone. It is data minimisation, not anonymisation.
+- The scanner and the sanitiser are filters, not guarantees: a determined attacker can phrase an
+  instruction the patterns do not know. Prompt-time defences and the measured injection results below are
+  what the system actually relies on.
+- Bare URLs in answers are not removed (a renderer may make them clickable; nothing is fetched).
+
+## Measured prompt-injection resistance
+
+A poisoned passage planted in the retrieved context (six attack styles, 20 questions) succeeded in 1.4% of
+trials against the plain prompt path (5/354), and in 0 of 240 against the agent, which is the default
+pipeline. Full method, numbers and caveats: [experiments.md](experiments.md#week-9-indirect-prompt-injection-runs-22-24).
+An extra "spotlighting" prompt was tested and not adopted because its benefit is not statistically
+distinguishable from noise (p = 0.22).

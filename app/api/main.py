@@ -1,6 +1,7 @@
 """FastAPI app. POST /chat streams Server-Sent Events:
 
 route    which pipeline answers (auto mode: after a one-call classification)
+notice   personal data was found in the question and masked before processing
 step     agent progress: each tool call as it finishes
 sources  the passages the answer is built from, numbered as the answer cites them
 token    answer text (streamed for baseline/graph; one event for agent/global)
@@ -32,7 +33,9 @@ from app.rag.router import PipelineRunner, Router
 from app.security import audit
 from app.security.access import AccessPolicy, reset_visible, set_visible
 from app.security.auth import TokenError, TokenVerifier, User
+from app.security.pii import redact_pii
 from app.security.ratelimit import SlidingWindowLimiter
+from app.security.sanitize import StreamSanitizer, sanitize_output
 
 log = logging.getLogger("api")
 Mode = Literal["auto", "baseline", "graph", "agent", "global"]
@@ -137,7 +140,7 @@ def source_dict(rank: int, rc) -> dict:
         "source": m.get("source", ""),
         "section": m.get("section", ""),
         "title": m.get("title", ""),
-        "text": rc.chunk.text,
+        "text": sanitize_output(rc.chunk.text),
         "score": rc.score,
     }
 
@@ -185,11 +188,11 @@ async def pipelines(request: Request, user: User = Depends(current_user)) -> dic
     return {"available": request.app.state.services.available()}
 
 
-async def choose(svc: Services, body: ChatRequest) -> tuple[str, str | None]:
+async def choose(svc: Services, mode: str, question: str) -> tuple[str, str | None]:
     """(pipeline, question kind). Unavailable pipelines fall back to the baseline."""
-    if body.mode != "auto":
-        return (body.mode if body.mode in svc.available() else "baseline"), None
-    kind, _ = await svc.router.classify(body.question)
+    if mode != "auto":
+        return (mode if mode in svc.available() else "baseline"), None
+    kind, _ = await svc.router.classify(question)
     name = svc.router.table.get(kind, svc.router.default)
     return (name if name in svc.available() else "baseline"), kind
 
@@ -199,11 +202,12 @@ async def chat(
     body: ChatRequest, request: Request, user: User = Depends(current_user)
 ) -> StreamingResponse:
     svc: Services = request.app.state.services
+    # Data minimisation: identifiers the user pasted never reach search, the LLM or the logs.
+    # Everything below, including audit hashes, uses the masked question only.
+    question, pii = redact_pii(body.question)
     allowed, retry_after = svc.limiter.check(user.id)
     if not allowed:
-        audit.record(
-            user_id=user.id, question=body.question, status="rate_limited", salt=svc.audit_salt
-        )
+        audit.record(user_id=user.id, question=question, status="rate_limited", salt=svc.audit_salt)
         raise HTTPException(
             429, "rate limit exceeded", headers={"Retry-After": str(int(retry_after) + 1)}
         )
@@ -220,25 +224,33 @@ async def chat(
         returned: list = []
         status = "ok"
         try:
-            name, kind = await choose(svc, body)
+            name, kind = await choose(svc, body.mode, question)
             yield sse("route", {"pipeline": name, "kind": kind})
+            if pii:
+                masked = ", ".join(f"{label} x{n}" for label, n in sorted(pii.items()))
+                yield sse(
+                    "notice", {"message": f"Personal data was masked in your question: {masked}"}
+                )
 
             if name in ("baseline", "graph"):
                 pipeline = svc.graph if name == "graph" else svc.baseline
-                async for what, value in pipeline.stream(body.question, body.k):
+                safe = StreamSanitizer()  # no links or images in answers, even split across tokens
+                async for what, value in pipeline.stream(question, body.k):
                     if what == "sources":
                         returned = value
                         yield sources_event(value)
-                    else:
+                    elif piece := safe.feed(value):
                         first_token = first_token or time.perf_counter() - start
-                        yield sse("token", value)
+                        yield sse("token", piece)
+                if tail := safe.flush():
+                    yield sse("token", tail)
             else:
                 steps: asyncio.Queue = asyncio.Queue()
                 runner = svc.agent if name == "agent" else svc.global_search
                 work = (
-                    asyncio.create_task(runner.run(body.question, on_step=steps.put))
+                    asyncio.create_task(runner.run(question, on_step=steps.put))
                     if name == "agent"
-                    else asyncio.create_task(runner.run(body.question))
+                    else asyncio.create_task(runner.run(question))
                 )
                 while not work.done() or not steps.empty():
                     try:
@@ -258,7 +270,7 @@ async def chat(
                 returned = answer.sources
                 yield sources_event(answer.sources)
                 first_token = time.perf_counter() - start
-                yield sse("token", answer.text)
+                yield sse("token", sanitize_output(answer.text))
 
             done = {
                 "ttft_s": first_token,
@@ -274,7 +286,7 @@ async def chat(
         finally:
             audit.record(
                 user_id=user.id,
-                question=body.question,
+                question=question,
                 status=status,
                 pipeline=name,
                 kind=kind,
@@ -285,6 +297,7 @@ async def chat(
                 tokens=meter.prompt_tokens + meter.completion_tokens,
                 llm_calls=meter.calls,
                 seconds=time.perf_counter() - start,
+                pii=pii,
                 salt=svc.audit_salt,
             )
             reset_visible(visible_token)

@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from app.providers.base import Embedder, VectorStore
 from app.rag.chunking import chunk_document
+from app.security.injection_scan import scan_text
 from ingestion.status import StatusStore
 
 SUPPORTED = {".txt", ".md", ".html", ".htm"}
@@ -45,7 +46,7 @@ def parse_document(blob_name: str, data: bytes) -> str:
 
 @dataclass
 class Outcome:
-    action: str  # indexed | skipped_unchanged | deleted | rejected
+    action: str  # indexed | skipped_unchanged | deleted | rejected | quarantined
     chunks: int = 0
 
 
@@ -68,6 +69,13 @@ class Ingestor:
         except UnsupportedDocument as exc:
             self.status.put(doc_id, status="rejected", error=str(exc))
             return Outcome("rejected")
+
+        # Anything indexed is later pasted into prompts, so look for injected instructions first.
+        # A quarantined upload is not indexed; a previously indexed clean version stays as it was.
+        if findings := scan_text(text):
+            reasons = "; ".join(f"{f.rule}: {f.snippet}" for f in findings)
+            self.status.put(doc_id, status="quarantined", error=reasons[:500])
+            return Outcome("quarantined")
 
         chunks = chunk_document(doc_id, text)
         if not chunks:

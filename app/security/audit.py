@@ -28,6 +28,7 @@ def record(
     tokens: int = 0,
     llm_calls: int = 0,
     seconds: float = 0.0,
+    pii: dict | None = None,
     salt: str = "",
 ) -> dict:
     entry = {
@@ -43,6 +44,7 @@ def record(
         "tokens": tokens,
         "llm_calls": llm_calls,
         "seconds": round(seconds, 2),
+        "pii_masked": pii or {},  # kinds and counts only, never the values
     }
     log.info(json.dumps(entry, ensure_ascii=False))
     return entry
