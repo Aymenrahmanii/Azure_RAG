@@ -91,13 +91,13 @@ def test_baseline_streams_route_sources_tokens_done(client):
 
 def test_auto_mode_routes_lookup_to_baseline(client):
     with client(FakeLLM("lookup")) as c:
-        events = parse(c.post("/chat", json={"question": "deadline?"}).text)
+        events = parse(c.post("/chat", json={"question": "deadline?", "mode": "auto"}).text)
     assert events[0] == ("route", {"pipeline": "baseline", "kind": "lookup"})
 
 
 def test_auto_mode_routes_multi_to_agent_and_reports_steps(client):
     with client(FakeLLM("multi")) as c:
-        events = parse(c.post("/chat", json={"question": "compare A and B"}).text)
+        events = parse(c.post("/chat", json={"question": "compare A and B", "mode": "auto"}).text)
     assert events[0] == ("route", {"pipeline": "agent", "kind": "multi"})
     assert names(events) == ["route", "step", "sources", "token", "done"]
     assert events[1][1]["tool"] == "search" and events[1][1]["new_passages"] == 1
@@ -123,3 +123,12 @@ def test_validation_and_health(client):
         assert c.post("/chat", json={"question": "x", "k": 99}).status_code == 422
         assert c.post("/chat", json={"question": "x", "mode": "nope"}).status_code == 422
         assert c.get("/healthz").json() == {"status": "ok"}
+
+
+def test_default_mode_is_agent_with_baseline_fallback(client):
+    with client() as c:
+        first = parse(c.post("/chat", json={"question": "x"}).text)[0]
+    assert first == ("route", {"pipeline": "agent", "kind": None})
+    with client(with_agent=False) as c:
+        first = parse(c.post("/chat", json={"question": "x"}).text)[0]
+    assert first[1]["pipeline"] == "baseline"

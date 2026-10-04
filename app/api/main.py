@@ -36,7 +36,7 @@ Mode = Literal["auto", "baseline", "graph", "agent", "global"]
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=7, ge=1, le=20)
-    mode: Mode = "auto"
+    mode: Mode = "agent"  # "auto" (router) did not beat always-agent: see docs/experiments.md
 
 
 @dataclass
