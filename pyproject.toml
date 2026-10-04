@@ -33,3 +33,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # eval/ and ingestion/ are not installed packages; bare `pytest` needs this
