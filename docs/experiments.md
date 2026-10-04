@@ -87,3 +87,25 @@ a 50K tokens/min deployment made the 1,337-chunk ingest take about 10 minutes (t
 With text-embedding-3-small the cross-encoder adds nothing measurable (recall@5 0.93 vs 0.94, MRR 0.95 vs 0.95), so the container drops PyTorch and runs hybrid only. Weakest group stays multi-article (0.79). The reranker mattered with the weak MiniLM embeddings (run 3 -> 4: 0.86 -> 0.93) but better embeddings absorbed that gain.
 
 **Cloud latency (Container App, scale 0-3):** cold start from zero replicas 4.3 s to a healthy response (includes loading 1,337 chunks into BM25 and the warm-up retrieval); warm /healthz 0.24 s; /chat first token about 1.5 s.
+
+## Week 7: GraphRAG (runs 13-18)
+
+Graph: 338 sections (recitals excluded), 2,755 entities, 988 citation edges (regex over "Article N" / "Annex X", resolved per regulation), 5,758 LLM-extracted relations, 35 Louvain communities with LLM summaries. Extraction cost one pass over 843 chunks with gpt-5.4-mini (about an hour at the deployment's rate limit), cached on disk.
+
+**Local search** = hybrid retrieval, then expand the top-3 sections through the graph (cited / citing sections, shared rare entities), 2 extra slots. Compared at equal context size (k=7: 5 base + 2 graph vs baseline top-7), fewshot prompt, Azure, hybrid, no recitals:
+
+| Run | Pipeline | recall@k | correctness | citation prec. | faithfulness | p50 / p95 |
+|---|---|---|---|---|---|---|
+| 13 | baseline k=7 (2 runs) | 0.947 | 0.85, 0.84 | 0.90, 0.86 | 0.99 | 3.7 s / 10.8 s |
+| 14 | baseline k=8 | 0.972 | 0.84 | 0.91 | 0.99 | |
+| 15 | **graph 5+2** (3 runs, last on the rebuilt graph) | 0.951 | 0.91, 0.87, 0.87 | 0.92, 0.91, 0.88 | 0.98-0.99 | 3.3 s / 10.5 s |
+
+By group (correctness, mean of runs): multi-article 0.78 baseline vs 0.87 graph; cross-regulation 0.54 vs 0.68, but cross-regulation swings 0.55-0.78 between graph runs (n=8), so that gain is not established.
+
+Findings:
+1. **Graph expansion does not improve retrieval recall.** At equal budget, simply retrieving one more chunk beats it (k=8: 0.972 vs graph 0.951). At fixed k=5 it hurts (0.93 -> 0.90) because graph slots displace correct base results.
+2. **It does improve answers modestly** (correctness +0.04 overall, consistent across 3 runs vs 3 baseline runs; multi-article +0.09). Likely mechanism: cited sections give the model the missing definitions and exceptions even when they are not what the question names. This was not isolated by an ablation (citation-only vs entity-only expansion).
+3. Run-to-run noise of the judged metrics is about +-0.02 overall and larger per group, so differences under 0.03 should not be trusted. The judge is the generator model, so absolute values are optimistic.
+4. In a diagnostic of the 6 sections the baseline missed at k=7, 4 were linked to a retrieved section by a citation or rare entity: the signal exists, but the 2-slot expansion ranking picked other candidates. Tuning seeds / weights did not change the result (sweep of 8 settings, 0.943-0.951).
+
+**Global search** (answer from the top-6 community summaries, ranked by BM25 + embeddings): not scored, because the 50-question set has no purely global questions. Qualitatively: with 18 communities (Louvain resolution 1.0) the ranking surfaced irrelevant clusters ("EU Borders ..." for incident reporting); with resolution 2.5 and hybrid ranking the sources were on topic and the answers synthesised across regulations. To score it, add ~10 global questions to the dataset (next step).

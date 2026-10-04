@@ -12,6 +12,9 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import settings
+from app.graph.build import GRAPH_PATH
+from app.graph.search import GraphConfig, GraphRetriever
+from app.graph.store import NetworkxGraphStore
 from app.providers.factory import make_embedder, make_llm, make_store
 from app.providers.openai_compat import ContentFiltered
 from app.rag import chunking
@@ -167,11 +170,16 @@ async def main_async(args) -> None:
         candidates=args.candidates,
     )
     retriever = Retriever(embedder, store, retr_cfg)
+    if args.graph:
+        retriever = GraphRetriever(
+            retriever, NetworkxGraphStore.load(GRAPH_PATH), GraphConfig(n_graph=args.graph_slots)
+        )
     llm = None
     if not args.no_generate:
         llm = make_llm(settings)
 
-    depth = max(args.k, max(K_VALUES))
+    # graph retrieval fills exactly k slots (base + expanded), so it cannot be asked for more
+    depth = args.k if args.graph else max(args.k, max(K_VALUES))
     retrieved_all = [retriever.retrieve(r["question"], depth) for r in dataset]
 
     sem = asyncio.Semaphore(args.concurrency)
@@ -212,6 +220,7 @@ async def main_async(args) -> None:
         "llm_auth": settings.llm_auth,
         "embedding_model": emb_model,
         "retrieval": vars(retr_cfg),
+        "graph": {"enabled": args.graph, "slots": args.graph_slots},
         "llm_model": None if args.no_generate else settings.llm_model,
         "chunk_max_chars": chunking.MAX_CHARS,
         "n_chunks": store.count(),
@@ -236,6 +245,8 @@ def main() -> None:
     p.add_argument("--exclude-recitals", action="store_true")
     p.add_argument("--hybrid", action="store_true")
     p.add_argument("--rerank", action="store_true")
+    p.add_argument("--graph", action="store_true", help="GraphRAG local search")
+    p.add_argument("--graph-slots", type=int, default=2, help="of k, slots for graph sections")
     p.add_argument("--candidates", type=int, default=30)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--concurrency", type=int, default=4)

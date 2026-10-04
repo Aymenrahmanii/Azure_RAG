@@ -42,6 +42,14 @@ class Retriever:
 
             self._reranker = CrossEncoder(config.reranker_model)
 
+    @property
+    def chunks(self) -> list[Chunk]:
+        return self._chunks
+
+    def bm25_scores(self, query: str):
+        """BM25 score of every chunk in `chunks` (same order) for `query`."""
+        return self._bm25.get_scores(tokenize(query))
+
     def _dense(self, query: str, n: int) -> list[RetrievedChunk]:
         flt = {"section": {"$ne": "Recitals"}} if self.config.exclude_recitals else None
         return self.store.search(self.embedder.embed([query])[0], n, flt)
