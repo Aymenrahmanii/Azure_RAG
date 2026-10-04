@@ -13,6 +13,15 @@ class ContentFiltered(Exception):
     """The provider's content filter / prompt shield rejected the request."""
 
 
+def parse_stream_line(line: str) -> str | None:
+    """Text delta from one SSE line, or None. Azure sends chunks with `choices: []` (content-filter
+    annotations) and role-only deltas, so a missing choice or content is normal, not an error."""
+    if not line.startswith("data: ") or line.endswith("[DONE]"):
+        return None
+    choices = json.loads(line[6:]).get("choices") or []
+    return (choices[0].get("delta") or {}).get("content") if choices else None
+
+
 class OpenAICompatLLM:
     def __init__(
         self,
@@ -77,8 +86,5 @@ class OpenAICompatLLM:
             ) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
-                    if not line.startswith("data: ") or line.endswith("[DONE]"):
-                        continue
-                    delta = json.loads(line[6:])["choices"][0]["delta"].get("content")
-                    if delta:
+                    if delta := parse_stream_line(line):
                         yield delta

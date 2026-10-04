@@ -21,12 +21,12 @@ class AzureOpenAIEmbedder:
         self._url = base_url.rstrip("/") + "/embeddings"
         self._deployment = deployment
         self._token_provider = token_provider
-        self._timeout = timeout
+        self._client = httpx.Client(timeout=timeout)  # reused: keeps the TLS connection warm
         self._max_retries = max_retries
 
-    def _post(self, client: httpx.Client, texts: list[str]) -> list[list[float]]:
+    def _post(self, texts: list[str]) -> list[list[float]]:
         for attempt in range(self._max_retries + 1):
-            resp = client.post(
+            resp = self._client.post(
                 self._url,
                 headers={"Authorization": f"Bearer {self._token_provider()}"},
                 json={"model": self._deployment, "input": texts},
@@ -40,7 +40,6 @@ class AzureOpenAIEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
-        with httpx.Client(timeout=self._timeout) as client:
-            for i in range(0, len(texts), BATCH):
-                out.extend(self._post(client, texts[i : i + BATCH]))
+        for i in range(0, len(texts), BATCH):
+            out.extend(self._post(texts[i : i + BATCH]))
         return out

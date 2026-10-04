@@ -8,9 +8,18 @@ Plan and rationale: [docs/PLAN.md](docs/PLAN.md). Status: week 1 (local prototyp
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[local,dev]"
 pre-commit install
 cp .env.example .env
 python scripts/download_corpus.py
 pytest
 ```
+
+## Run the API and UI
+
+```bash
+uvicorn app.api.main:app --port 8000      # POST /chat streams Server-Sent Events: sources, token*, done
+streamlit run ui/streamlit_app.py         # chat UI with citations (API_URL env var, default localhost:8000)
+```
+
+Deploy to Container Apps: see the two-step flow at the top of [infra/app.tf](infra/app.tf).

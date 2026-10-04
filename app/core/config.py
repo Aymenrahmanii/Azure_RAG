@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     ingest_queue: str = "ingest"
     servicebus_namespace: str = ""  # e.g. sb-azrag-dev-xxxxx.servicebus.windows.net
 
+    # Retrieval (API). Cross-encoder rerank needs PyTorch, which the container image omits.
+    retrieval_hybrid: bool = True
+    retrieval_rerank: bool = False
+
     azure_openai_endpoint: str = ""
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""

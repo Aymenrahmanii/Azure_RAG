@@ -4,10 +4,8 @@ import re
 from dataclasses import dataclass
 
 from rank_bm25 import BM25Okapi
-from sentence_transformers import CrossEncoder
 
-from app.providers.base import Chunk, Embedder, RetrievedChunk
-from app.providers.local import ChromaStore
+from app.providers.base import Chunk, Embedder, RetrievedChunk, VectorStore
 
 RRF_K = 60
 TOKEN_RE = re.compile(r"\w+")
@@ -27,17 +25,19 @@ def tokenize(text: str) -> list[str]:
 
 
 class Retriever:
-    def __init__(self, embedder: Embedder, store: ChromaStore, config: RetrievalConfig):
+    def __init__(self, embedder: Embedder, store: VectorStore, config: RetrievalConfig):
         self.embedder, self.store, self.config = embedder, store, config
         self._chunks: list[Chunk] = []
         self._bm25: BM25Okapi | None = None
-        self._reranker: CrossEncoder | None = None
+        self._reranker = None
         if config.hybrid:
-            self._chunks = store.all_chunks()
+            self._chunks = store.all_chunks()  # type: ignore[attr-defined]
             if config.exclude_recitals:
                 self._chunks = [c for c in self._chunks if c.metadata["section"] != "Recitals"]
             self._bm25 = BM25Okapi([tokenize(c.text) for c in self._chunks])
         if config.rerank:
+            from sentence_transformers import CrossEncoder  # heavy (torch): import lazily
+
             self._reranker = CrossEncoder(config.reranker_model)
 
     def _dense(self, query: str, n: int) -> list[RetrievedChunk]:

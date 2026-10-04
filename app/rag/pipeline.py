@@ -1,3 +1,5 @@
+import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from app.providers.base import LLMProvider, RetrievedChunk
@@ -38,3 +40,17 @@ class RAGPipeline:
         except ContentFiltered:
             return Answer("Request blocked by the content safety filter.", sources)
         return Answer(text, sources)
+
+    async def stream(self, question: str, k: int = 5) -> AsyncIterator[tuple[str, object]]:
+        """Yield ("sources", list[RetrievedChunk]) first, then ("token", str) pieces of the answer.
+        Retrieval is blocking (network + CPU), so it runs in a thread to keep the loop free."""
+        sources = await asyncio.to_thread(self.retriever.retrieve, question, k)
+        yield "sources", sources
+        if self.llm is None:
+            yield "token", "(no LLM configured: showing retrieved passages only)"
+            return
+        try:
+            async for piece in self.llm.stream(self.system_prompt, build_prompt(question, sources)):
+                yield "token", piece
+        except ContentFiltered:
+            yield "token", "Request blocked by the content safety filter."
