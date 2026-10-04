@@ -10,7 +10,6 @@ infra
 ingestion
 tests
 docs
-ui
 scripts
 **/__pycache__
 *.egg-info

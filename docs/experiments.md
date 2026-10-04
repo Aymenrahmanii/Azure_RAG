@@ -18,6 +18,7 @@ Judge and generator are the same model (gpt-5.4-mini), so judge scores are optim
 | 9 | **g-fewshot** | r5 retrieval + balanced prompt + 3 few-shot examples | 0.94 | 0.95 | 0.00 | 1.00 | 0.88 | 0.89 | 0.02 | 1.00 | 2.9 s / 10.3 s |
 | 10 | az-fewshot | **Azure**: AI Search (vector store) + Entra-token auth to Azure OpenAI, same pipeline as run 9 | 0.94 | 0.95 | 0.00 | 1.00 | 0.85 | 0.91 | 0.05 | 1.00 | 3.1 s / 11.0 s |
 | 11 | az-embed3small | Embeddings: bge-small (384d, local) -> Azure OpenAI text-embedding-3-small (1536d, cloud); hybrid + rerank unchanged (retrieval only) | 0.94 | 0.95 | 0.00 | | | | | | |
+| 12 | az-norerank | Run 11 without the cross-encoder (hybrid + no recitals only): what the PyTorch-free container actually runs | 0.93 | 0.95 | 0.00 | | | | | | |
 
 ## Baseline findings (run 20261003-183218)
 
@@ -80,3 +81,9 @@ Functions cannot ship PyTorch, so cloud ingestion uses Azure OpenAI embeddings. 
 the local bge-small model (recall@5 0.94, MRR 0.95): with hybrid search and a reranker in front, the embedding
 model is no longer the bottleneck. Cloud embedding is therefore a free choice quality-wise. The cost is rate limits:
 a 50K tokens/min deployment made the 1,337-chunk ingest take about 10 minutes (the client backs off on 429).
+
+## Week 6: is the reranker still needed? (run 12)
+
+With text-embedding-3-small the cross-encoder adds nothing measurable (recall@5 0.93 vs 0.94, MRR 0.95 vs 0.95), so the container drops PyTorch and runs hybrid only. Weakest group stays multi-article (0.79). The reranker mattered with the weak MiniLM embeddings (run 3 -> 4: 0.86 -> 0.93) but better embeddings absorbed that gain.
+
+**Cloud latency (Container App, scale 0-3):** cold start from zero replicas 4.3 s to a healthy response (includes loading 1,337 chunks into BM25 and the warm-up retrieval); warm /healthz 0.24 s; /chat first token about 1.5 s.

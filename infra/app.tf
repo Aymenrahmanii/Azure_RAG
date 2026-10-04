@@ -10,6 +10,12 @@ variable "api_image_tag" {
   default     = ""
 }
 
+variable "ui_image_tag" {
+  description = "Tag of azrag-ui in the registry. Empty = do not create the UI Container App."
+  type        = string
+  default     = ""
+}
+
 variable "api_max_replicas" {
   description = "Upper bound on replicas: a cost and Azure OpenAI quota safety net."
   type        = number
@@ -141,4 +147,55 @@ output "acr_name" {
 
 output "api_url" {
   value = try("https://${azurerm_container_app.api[0].ingress[0].fqdn}", null)
+}
+
+resource "azurerm_container_app" "ui" {
+  count                        = var.ui_image_tag == "" || var.api_image_tag == "" ? 0 : 1
+  name                         = "ca-${local.name}-ui"
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  revision_mode                = "Single"
+  tags                         = local.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.app.id
+  }
+
+  ingress {
+    external_enabled = true
+    target_port      = 8501
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
+  template {
+    min_replicas = 0
+    max_replicas = 1 # Streamlit keeps per-session state in the process: one replica is enough here
+
+    container {
+      name   = "ui"
+      image  = "${azurerm_container_registry.main.login_server}/azrag-ui:${var.ui_image_tag}"
+      cpu    = 0.25
+      memory = "0.5Gi"
+
+      env {
+        name  = "API_URL"
+        value = "https://${azurerm_container_app.api[0].ingress[0].fqdn}"
+      }
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.app_acr_pull]
+}
+
+output "ui_url" {
+  value = try("https://${azurerm_container_app.ui[0].ingress[0].fqdn}", null)
 }

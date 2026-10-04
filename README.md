@@ -22,4 +22,4 @@ uvicorn app.api.main:app --port 8000      # POST /chat streams Server-Sent Event
 streamlit run ui/streamlit_app.py         # chat UI with citations (API_URL env var, default localhost:8000)
 ```
 
-Deploy to Container Apps: see the two-step flow at the top of [infra/app.tf](infra/app.tf).
+Deploy to Container Apps (API and UI): see the flow at the top of [infra/app.tf](infra/app.tf). Images are built locally (`Dockerfile`, `Dockerfile.ui`) and pushed to ACR.

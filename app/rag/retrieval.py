@@ -34,6 +34,8 @@ class Retriever:
             self._chunks = store.all_chunks()  # type: ignore[attr-defined]
             if config.exclude_recitals:
                 self._chunks = [c for c in self._chunks if c.metadata["section"] != "Recitals"]
+            if not self._chunks:
+                raise RuntimeError("vector store is empty: run ingestion, check VECTOR_STORE")
             self._bm25 = BM25Okapi([tokenize(c.text) for c in self._chunks])
         if config.rerank:
             from sentence_transformers import CrossEncoder  # heavy (torch): import lazily
