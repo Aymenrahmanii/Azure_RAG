@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     cosmos_container: str = "documents"
     storage_account_url: str = ""
     documents_container: str = "documents"
+    graph_container: str = ""  # blob container holding graph.json (empty = use the local file)
     ingest_queue: str = "ingest"
     servicebus_namespace: str = ""  # e.g. sb-azrag-dev-xxxxx.servicebus.windows.net
 

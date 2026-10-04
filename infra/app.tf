@@ -115,6 +115,14 @@ resource "azurerm_container_app" "api" {
         name  = "LLM_MODEL"
         value = var.chat_deployment
       }
+      env {
+        name  = "STORAGE_ACCOUNT_URL"
+        value = azurerm_storage_account.main.primary_blob_endpoint
+      }
+      env {
+        name  = "GRAPH_CONTAINER"
+        value = azurerm_storage_container.graph.name
+      }
 
       startup_probe {
         transport = "HTTP"
@@ -198,4 +206,12 @@ resource "azurerm_container_app" "ui" {
 
 output "ui_url" {
   value = try("https://${azurerm_container_app.ui[0].ingress[0].fqdn}", null)
+}
+
+# ---- Knowledge graph artifact: built offline (python -m app.graph.build), loaded by the API ------
+
+resource "azurerm_storage_container" "graph" {
+  name                  = "graph"
+  storage_account_id    = azurerm_storage_account.main.id
+  container_access_type = "private"
 }

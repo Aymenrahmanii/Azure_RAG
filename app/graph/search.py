@@ -130,6 +130,9 @@ class GlobalSearch:
             )
         return out
 
+    async def run(self, question: str) -> Answer:
+        return await self.ask(question)
+
     async def ask(self, question: str) -> Answer:
         sources = self._passages(question)
         try:

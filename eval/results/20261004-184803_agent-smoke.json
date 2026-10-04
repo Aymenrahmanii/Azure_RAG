@@ -1,0 +1,406 @@
+{
+  "config": {
+    "label": "agent-smoke",
+    "k": 5,
+    "prompt": "fewshot",
+    "vector_store": "azure_search",
+    "llm_auth": "entra",
+    "embedding_model": "azure-openai:text-embedding-3-small",
+    "retrieval": {
+      "exclude_recitals": true,
+      "hybrid": true,
+      "rerank": false,
+      "candidates": 30,
+      "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    },
+    "graph": {
+      "enabled": false,
+      "slots": 2
+    },
+    "agent": {
+      "enabled": true,
+      "graph_tools": true
+    },
+    "llm_model": "gpt-5.4-mini",
+    "chunk_max_chars": 1500,
+    "n_chunks": 1337
+  },
+  "summary": {
+    "overall": {
+      "n": 6,
+      "recall@1": 1.0,
+      "recall@3": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "recall@all": 1.0,
+      "mrr": 1.0,
+      "recital_share": 0.0,
+      "faithfulness": 1.0,
+      "relevance": 1.0,
+      "correctness": 1.0,
+      "citation_precision": 1.0,
+      "false_refusal_rate": 0.0,
+      "correct_abstention_rate": null,
+      "tokens": 1885.1666666666667,
+      "llm_calls": 2.0,
+      "context_chunks": 3.0,
+      "latency_p50_s": 13.3,
+      "latency_p95_s": 16.71
+    },
+    "by_type": {
+      "direct": {
+        "n": 6,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "recall@all": 1.0,
+        "mrr": 1.0,
+        "recital_share": 0.0,
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "citation_precision": 1.0,
+        "false_refusal_rate": 0.0,
+        "correct_abstention_rate": null,
+        "tokens": 1885.1666666666667,
+        "llm_calls": 2.0,
+        "context_chunks": 3.0,
+        "latency_p50_s": 13.3,
+        "latency_p95_s": 16.71
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "q01",
+      "type": "direct",
+      "question": "What principles relate to the processing of personal data under the GDPR?",
+      "expected_behavior": "answer",
+      "expected_sections": [
+        "gdpr:Article 5"
+      ],
+      "retrieved": [
+        "gdpr:Article 5 (0.03)",
+        "gdpr:Article 5 (0.03)",
+        "gdpr:Article 1 (0.03)"
+      ],
+      "retrieval": {
+        "recital_share": 0.0,
+        "distinct_sections": 2,
+        "top1_score": 0.03252247488101534,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "recall@all": 1.0
+      },
+      "generation": {
+        "answer": "Under the GDPR, the principles relating to the processing of personal data are:  \n- lawfulness, fairness and transparency [1]  \n- purpose limitation [1]  \n- data minimisation [1]  \n- accuracy [1][2]  \n- storage limitation [2]  \n- integrity and confidentiality [2]  \n- accountability [2]\n\nThe documents provided do not add any other GDPR processing principles beyond these.",
+        "latency_s": 16.71,
+        "blocked": false,
+        "tokens": 1719,
+        "llm_calls": 2,
+        "context_chunks": 3,
+        "steps": 1,
+        "stop_reason": "answered",
+        "trace": [
+          {
+            "n": 1,
+            "tool": "search",
+            "args": {
+              "query": "GDPR principles relating to the processing of personal data Article 5",
+              "k": 3
+            },
+            "result_chars": 2958,
+            "new_passages": 3,
+            "seconds": 9.24,
+            "note": ""
+          }
+        ],
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "declined": false,
+        "reason": "The answer lists all GDPR processing principles in the context and matches the reference answer.",
+        "citation_precision": 1.0
+      }
+    },
+    {
+      "id": "q02",
+      "type": "direct",
+      "question": "Within how many hours must a controller notify the supervisory authority of a personal data breach?",
+      "expected_behavior": "answer",
+      "expected_sections": [
+        "gdpr:Article 33"
+      ],
+      "retrieved": [
+        "gdpr:Article 33 (0.03)",
+        "gdpr:Article 33 (0.03)",
+        "gdpr:Article 34 (0.03)"
+      ],
+      "retrieval": {
+        "recital_share": 0.0,
+        "distinct_sections": 2,
+        "top1_score": 0.03278688524590164,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "recall@all": 1.0
+      },
+      "generation": {
+        "answer": "A controller must notify the supervisory authority **within 72 hours after becoming aware of the personal data breach**, where feasible. If it is not notified within 72 hours, the delay must be explained. [1]",
+        "latency_s": 14.12,
+        "blocked": false,
+        "tokens": 1810,
+        "llm_calls": 2,
+        "context_chunks": 3,
+        "steps": 1,
+        "stop_reason": "answered",
+        "trace": [
+          {
+            "n": 1,
+            "tool": "search",
+            "args": {
+              "query": "GDPR personal data breach controller notify supervisory authority within how many hours Article 33",
+              "k": 3
+            },
+            "result_chars": 3488,
+            "new_passages": 3,
+            "seconds": 8.37,
+            "note": ""
+          }
+        ],
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "declined": false,
+        "reason": "The answer matches the context and reference, stating the 72-hour deadline and the without-undue-delay requirement.",
+        "citation_precision": 1.0
+      }
+    },
+    {
+      "id": "q03",
+      "type": "direct",
+      "question": "At what age can a child consent to information society services without parental authorisation under the GDPR?",
+      "expected_behavior": "answer",
+      "expected_sections": [
+        "gdpr:Article 8"
+      ],
+      "retrieved": [
+        "gdpr:Article 8 (0.03)",
+        "gdpr:Article 21 (0.03)",
+        "gdpr:Article 7 (0.03)"
+      ],
+      "retrieval": {
+        "recital_share": 0.0,
+        "distinct_sections": 3,
+        "top1_score": 0.03278688524590164,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "recall@all": 1.0
+      },
+      "generation": {
+        "answer": "Under the GDPR, a child can consent to information society services without parental authorisation if the child is at least 16 years old. Member States may set a lower age, but not below 13 years. [1]",
+        "latency_s": 13.3,
+        "blocked": false,
+        "tokens": 1725,
+        "llm_calls": 2,
+        "context_chunks": 3,
+        "steps": 1,
+        "stop_reason": "answered",
+        "trace": [
+          {
+            "n": 1,
+            "tool": "search",
+            "args": {
+              "query": "GDPR child consent information society services age without parental authorisation Article 8",
+              "k": 3
+            },
+            "result_chars": 2929,
+            "new_passages": 3,
+            "seconds": 9.61,
+            "note": ""
+          }
+        ],
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "declined": false,
+        "reason": "The answer matches Article 8 and states the correct default and allowed lower-age exception.",
+        "citation_precision": 1.0
+      }
+    },
+    {
+      "id": "q04",
+      "type": "direct",
+      "question": "What is the maximum administrative fine for the most serious GDPR infringements?",
+      "expected_behavior": "answer",
+      "expected_sections": [
+        "gdpr:Article 83"
+      ],
+      "retrieved": [
+        "gdpr:Article 83 (0.03)",
+        "gdpr:Article 83 (0.03)",
+        "gdpr:Article 83 (0.03)"
+      ],
+      "retrieval": {
+        "recital_share": 0.0,
+        "distinct_sections": 1,
+        "top1_score": 0.032266458495966696,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "recall@all": 1.0
+      },
+      "generation": {
+        "answer": "For the most serious GDPR infringements, the maximum administrative fine is **up to EUR 20,000,000 or, in the case of an undertaking, up to 4% of the total worldwide annual turnover of the preceding financial year, whichever is higher** [3].",
+        "latency_s": 14.01,
+        "blocked": false,
+        "tokens": 2100,
+        "llm_calls": 2,
+        "context_chunks": 3,
+        "steps": 1,
+        "stop_reason": "answered",
+        "trace": [
+          {
+            "n": 1,
+            "tool": "search",
+            "args": {
+              "query": "GDPR maximum administrative fine most serious infringements Article 83(5) 83(6)",
+              "k": 3
+            },
+            "result_chars": 4629,
+            "new_passages": 3,
+            "seconds": 8.14,
+            "note": ""
+          }
+        ],
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "declined": false,
+        "reason": "The answer matches the context and reference exactly.",
+        "citation_precision": 1.0
+      }
+    },
+    {
+      "id": "q05",
+      "type": "direct",
+      "question": "When must a controller or processor designate a data protection officer?",
+      "expected_behavior": "answer",
+      "expected_sections": [
+        "gdpr:Article 37"
+      ],
+      "retrieved": [
+        "gdpr:Article 37 (0.03)",
+        "gdpr:Article 37 (0.03)",
+        "gdpr:Article 38 (0.03)"
+      ],
+      "retrieval": {
+        "recital_share": 0.0,
+        "distinct_sections": 2,
+        "top1_score": 0.03252247488101534,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "recall@all": 1.0
+      },
+      "generation": {
+        "answer": "A controller or processor must designate a data protection officer in any case where:  \n- the processing is carried out by a public authority or body, except courts acting in their judicial capacity;  \n- the core activities consist of processing operations that, by their nature, scope, and/or purposes, require regular and systematic monitoring of data subjects on a large scale; or  \n- the core activities consist of large-scale processing of special categories of data under Article 9 and personal data relating to criminal convictions and offences under Article 10. [2]\n\nOutside those cases, designation is optional unless required by Union or Member State law. [1][2]\n\n",
+        "latency_s": 12.81,
+        "blocked": false,
+        "tokens": 1941,
+        "llm_calls": 2,
+        "context_chunks": 3,
+        "steps": 1,
+        "stop_reason": "answered",
+        "trace": [
+          {
+            "n": 1,
+            "tool": "search",
+            "args": {
+              "query": "GDPR when must a controller or processor designate a data protection officer Article 37",
+              "k": 3
+            },
+            "result_chars": 3948,
+            "new_passages": 3,
+            "seconds": 0.46,
+            "note": ""
+          }
+        ],
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "declined": false,
+        "reason": "The answer matches the GDPR Article 37 mandatory designation cases and correctly notes that other cases are optional unless required by law.",
+        "citation_precision": 1.0
+      }
+    },
+    {
+      "id": "q06",
+      "type": "direct",
+      "question": "What does the right to data portability give a data subject?",
+      "expected_behavior": "answer",
+      "expected_sections": [
+        "gdpr:Article 20"
+      ],
+      "retrieved": [
+        "gdpr:Article 20 (0.03)",
+        "gdpr:Article 15 (0.03)",
+        "gdpr:Article 14 (0.03)"
+      ],
+      "retrieval": {
+        "recital_share": 0.0,
+        "distinct_sections": 3,
+        "top1_score": 0.03278688524590164,
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "recall@all": 1.0
+      },
+      "generation": {
+        "answer": "The right to data portability gives a data subject the right to receive personal data concerning them, which they have provided to a controller, in a structured, commonly used, and machine-readable format, and to transmit those data to another controller without hindrance from the original controller, where the processing is based on consent or a contract and carried out by automated means [1]. It also gives the right to have the data transmitted directly from one controller to another, where technically feasible [1].",
+        "latency_s": 11.81,
+        "blocked": false,
+        "tokens": 2016,
+        "llm_calls": 2,
+        "context_chunks": 3,
+        "steps": 1,
+        "stop_reason": "answered",
+        "trace": [
+          {
+            "n": 1,
+            "tool": "search",
+            "args": {
+              "query": "GDPR right to data portability what does it give a data subject Article 20",
+              "k": 3
+            },
+            "result_chars": 4045,
+            "new_passages": 3,
+            "seconds": 1.14,
+            "note": ""
+          }
+        ],
+        "faithfulness": 1.0,
+        "relevance": 1.0,
+        "correctness": 1.0,
+        "declined": false,
+        "reason": "The answer matches the context and reference, accurately stating the portability rights and the direct transmission option.",
+        "citation_precision": 1.0
+      }
+    }
+  ]
+}

@@ -15,6 +15,7 @@ TYPES = {
     "adversarial",
     "ambiguous",
     "partial",
+    "global",
 }
 
 

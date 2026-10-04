@@ -26,6 +26,8 @@ def reciprocal_rank(retrieved: list[RetrievedChunk], expected: list[str]) -> flo
 
 def recital_share(retrieved: list[RetrievedChunk], k: int) -> float:
     top = retrieved[:k]
+    if not top:
+        return 0.0
     return sum(r.chunk.metadata["section"] == "Recitals" for r in top) / len(top)
 
 

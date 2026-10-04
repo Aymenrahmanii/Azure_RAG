@@ -3,10 +3,31 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from contextvars import ContextVar
+from dataclasses import dataclass
 
 import httpx
 
 RETRYABLE = {429, 500, 502, 503, 504}
+
+
+@dataclass
+class Usage:
+    """Token and call counts. Set `usage_var` in a task to meter everything that task spends."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls: int = 0
+
+    def add(self, raw: dict | None) -> None:
+        self.calls += 1
+        if raw:
+            self.prompt_tokens += raw.get("prompt_tokens", 0)
+            self.completion_tokens += raw.get("completion_tokens", 0)
+
+
+# A ContextVar (not an attribute on the LLM) so concurrent requests are metered separately.
+usage_var: ContextVar[Usage | None] = ContextVar("usage", default=None)
 
 
 class ContentFiltered(Exception):
@@ -46,21 +67,20 @@ class OpenAICompatLLM:
         return {"Authorization": f"Bearer {token}"} if token else {}
 
     def _payload(self, system: str, user: str, stream: bool) -> dict:
-        payload = {
-            "model": self._model,
-            "stream": stream,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
+        return self._body(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}], stream
+        )
+
+    def _body(self, messages: list[dict], stream: bool, tools: list[dict] | None = None) -> dict:
+        payload = {"model": self._model, "stream": stream, "messages": messages}
+        if tools:
+            payload["tools"] = tools
         if self._temperature is not None:
             payload["temperature"] = self._temperature
         return payload
 
-    async def generate(self, system: str, user: str) -> str:
+    async def _post(self, payload: dict) -> dict:
         """POST with retries on 429 / 5xx / timeouts: exponential backoff, honours Retry-After."""
-        payload = self._payload(system, user, False)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             for attempt in range(self._max_retries + 1):
                 try:
@@ -74,10 +94,23 @@ class OpenAICompatLLM:
                         if resp.status_code == 400 and "content management policy" in resp.text:
                             raise ContentFiltered(resp.text[:300])
                         resp.raise_for_status()
-                        return resp.json()["choices"][0]["message"]["content"]
+                        data = resp.json()
+                        if meter := usage_var.get():
+                            meter.add(data.get("usage"))
+                        return data
                     delay = float(resp.headers.get("retry-after", 2.0**attempt))
                 await asyncio.sleep(min(delay, 60))
         raise RuntimeError("unreachable")
+
+    async def generate(self, system: str, user: str) -> str:
+        data = await self._post(self._payload(system, user, False))
+        return data["choices"][0]["message"]["content"]
+
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+        """One chat turn that may call tools; returns the assistant message
+        ({"content": ..., "tool_calls": [...]})."""
+        data = await self._post(self._body(messages, False, tools))
+        return data["choices"][0]["message"]
 
     async def stream(self, system: str, user: str) -> AsyncIterator[str]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:

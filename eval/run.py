@@ -13,14 +13,16 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.graph.build import GRAPH_PATH
-from app.graph.search import GraphConfig, GraphRetriever
+from app.graph.search import GlobalSearch, GraphConfig, GraphRetriever
 from app.graph.store import NetworkxGraphStore
 from app.providers.factory import make_embedder, make_llm, make_store
-from app.providers.openai_compat import ContentFiltered
+from app.providers.openai_compat import ContentFiltered, Usage, usage_var
 from app.rag import chunking
-from app.rag.pipeline import build_prompt
+from app.rag.agent import Agent
+from app.rag.pipeline import RAGPipeline, build_prompt
 from app.rag.prompts import PROMPTS
 from app.rag.retrieval import RetrievalConfig, Retriever
+from app.rag.router import PipelineRunner, Router
 from eval.judge import judge
 from eval.metrics import (
     citation_precision,
@@ -37,25 +39,54 @@ K_VALUES = (1, 3, 5, 10)
 REFUSAL_PHRASE = "I don't know based on the provided documents"
 
 
+class GlobalRunner:
+    """Adapts GlobalSearch to the agent interface (`run(question)`) used by the harness."""
+
+    def __init__(self, search: GlobalSearch):
+        self.search = search
+
+    async def run(self, question: str):
+        answer = await self.search.ask(question)
+        answer.trace, answer.stop_reason = [], "answered"
+        return answer
+
+
 def retrieval_metrics(row: dict, retrieved: list, k: int) -> dict:
     out = {
         "recital_share": recital_share(retrieved, k),
         "distinct_sections": distinct_sections(retrieved, k),
-        "top1_score": retrieved[0].score,
+        "top1_score": retrieved[0].score if retrieved else 0.0,
     }
     if row["expected_sections"]:
         exp = row["expected_sections"]
         out.update({f"recall@{n}": recall_at_k(retrieved, exp, n) for n in K_VALUES})
         out["mrr"] = reciprocal_rank(retrieved, exp)
+        # over everything returned: the fair number when pipelines return different amounts
+        out["recall@all"] = recall_at_k(retrieved, exp, max(len(retrieved), 1))
     return out
 
 
-async def evaluate_row(row, retrieved, k, llm, sem, system_prompt):
+async def evaluate_row(row, retrieved, k, llm, sem, system_prompt, agent=None):
     sources = retrieved[:k]
     async with sem:
         t0 = time.perf_counter()
+        meter = Usage()
+        meter_token = usage_var.set(meter)  # generation only: the judge is not part of the cost
+        extra = {}
         try:
-            answer = await llm.generate(system_prompt, build_prompt(row["question"], sources))
+            if agent:
+                result = await agent.run(row["question"])
+                answer, sources = result.text, result.sources
+                trace = getattr(result, "trace", [])  # only the agent has one
+                extra = {
+                    "route": getattr(result, "route", None),
+                    "kind": getattr(result, "kind", None),
+                    "steps": len(trace),
+                    "stop_reason": getattr(result, "stop_reason", "answered"),
+                    "trace": [vars(t) for t in trace],
+                }
+            else:
+                answer = await llm.generate(system_prompt, build_prompt(row["question"], sources))
         except ContentFiltered:
             # Blocked by the provider's prompt shield before reaching the model: a refusal.
             ok = row["expected_behavior"] == "abstain"
@@ -68,7 +99,10 @@ async def evaluate_row(row, retrieved, k, llm, sem, system_prompt):
                 "correctness": float(ok),
                 "declined": True,
                 "reason": "blocked by content filter",
+                "sources": sources,
             }
+        finally:
+            usage_var.reset(meter_token)
         latency = time.perf_counter() - t0
         try:
             verdict = await judge(llm, row["question"], sources, answer, row["reference_answer"])
@@ -82,7 +116,17 @@ async def evaluate_row(row, retrieved, k, llm, sem, system_prompt):
                 "reason": "judge blocked by content filter; declined from phrase match",
                 "judge_blocked": True,
             }
-    res = {"answer": answer, "latency_s": round(latency, 2), "blocked": False, **verdict}
+    res = {
+        "answer": answer,
+        "latency_s": round(latency, 2),
+        "blocked": False,
+        "tokens": meter.prompt_tokens + meter.completion_tokens,
+        "llm_calls": meter.calls,
+        "context_chunks": len(sources),
+        "sources": sources,
+        **extra,
+        **verdict,
+    }
     if row["expected_sections"]:
         res["citation_precision"] = citation_precision(answer, sources, row["expected_sections"])
     return res
@@ -96,7 +140,7 @@ def summarize(rows: list[dict]) -> dict:
             return mean([r[src][key] for r in subset if r.get(src) and r[src].get(key) is not None])
 
         out = {"n": len(subset)}
-        for key in [f"recall@{n}" for n in K_VALUES] + ["mrr", "recital_share"]:
+        for key in [f"recall@{n}" for n in K_VALUES] + ["recall@all", "mrr", "recital_share"]:
             out[key] = m(key)
         answerable = [
             r for r in subset if r["expected_behavior"] == "answer" and r.get("generation")
@@ -114,6 +158,8 @@ def summarize(rows: list[dict]) -> dict:
         )
         out["false_refusal_rate"] = mean([float(r["generation"]["declined"]) for r in answerable])
         out["correct_abstention_rate"] = mean([float(r["generation"]["declined"]) for r in abstain])
+        for key in ("tokens", "llm_calls", "context_chunks"):
+            out[key] = mean([r["generation"][key] for r in gen if key in r["generation"]])
         out["latency_p50_s"] = percentile([r["generation"]["latency_s"] for r in gen], 50)
         out["latency_p95_s"] = percentile([r["generation"]["latency_s"] for r in gen], 95)
         return out
@@ -133,12 +179,15 @@ def percentile(values: list[float], p: int) -> float | None:
 
 
 def fmt(v) -> str:
-    return "-" if v is None else f"{v:.2f}"
+    if v is None:
+        return "-"
+    return f"{v:.0f}" if abs(v) >= 100 else f"{v:.2f}"
 
 
 def print_table(summary: dict) -> None:
     cols = [
         "recall@5",
+        "recall@all",
         "mrr",
         "recital_share",
         "faithfulness",
@@ -146,6 +195,9 @@ def print_table(summary: dict) -> None:
         "citation_precision",
         "false_refusal_rate",
         "correct_abstention_rate",
+        "tokens",
+        "llm_calls",
+        "context_chunks",
     ]
     print("\n| group | n | " + " | ".join(cols) + " |")
     print("|---|---|" + "---|" * len(cols))
@@ -177,22 +229,49 @@ async def main_async(args) -> None:
     llm = None
     if not args.no_generate:
         llm = make_llm(settings)
+    agent = None
+    if args.agent:
+        graph = NetworkxGraphStore.load(GRAPH_PATH) if GRAPH_PATH.exists() else None
+        agent = Agent(llm, retriever, None if args.agent_no_graph else graph)
+
+    if args.global_search:
+        agent = GlobalRunner(
+            GlobalSearch(llm, NetworkxGraphStore.load(GRAPH_PATH), embedder=embedder)
+        )
+
+    if args.router:
+        graph = NetworkxGraphStore.load(GRAPH_PATH)
+        graph_retriever = GraphRetriever(retriever, graph, GraphConfig(n_graph=2))
+        runners = {
+            "baseline": PipelineRunner(RAGPipeline(retriever, llm, PROMPTS[args.prompt]), 7),
+            "graph": PipelineRunner(RAGPipeline(graph_retriever, llm, PROMPTS[args.prompt]), 7),
+            "agent": Agent(llm, retriever, graph),
+            "global": GlobalSearch(llm, graph, embedder=embedder),
+        }
+        table = dict(pair.split("=") for pair in args.route_table.split(","))
+        agent = Router(llm, runners, table)
 
     # graph retrieval fills exactly k slots (base + expanded), so it cannot be asked for more
     depth = args.k if args.graph else max(args.k, max(K_VALUES))
-    retrieved_all = [retriever.retrieve(r["question"], depth) for r in dataset]
+    if agent:
+        retrieved_all = [[] for _ in dataset]  # the agent decides what to retrieve
+    else:
+        retrieved_all = [retriever.retrieve(r["question"], depth) for r in dataset]
 
     sem = asyncio.Semaphore(args.concurrency)
     gen_results = [None] * len(dataset)
     if llm:
         tasks = [
-            evaluate_row(row, ret, args.k, llm, sem, PROMPTS[args.prompt])
+            evaluate_row(row, ret, args.k, llm, sem, PROMPTS[args.prompt], agent)
             for row, ret in zip(dataset, retrieved_all, strict=True)
         ]
         gen_results = await asyncio.gather(*tasks)
 
     rows = []
     for row, ret, gen in zip(dataset, retrieved_all, gen_results, strict=True):
+        if gen:
+            ret = gen.pop("sources")  # what the answer was actually generated from
+        shown = len(ret) if agent else args.k  # agent / global: everything the answer used
         rows.append(
             {
                 "id": row["id"],
@@ -202,9 +281,9 @@ async def main_async(args) -> None:
                 "expected_sections": row["expected_sections"],
                 "retrieved": [
                     f"{r.chunk.metadata['source']}:{r.chunk.metadata['section']} ({r.score:.2f})"
-                    for r in ret[: args.k]
+                    for r in ret[:shown]
                 ],
-                "retrieval": retrieval_metrics(row, ret, args.k),
+                "retrieval": retrieval_metrics(row, ret, shown or 1),
                 "generation": gen,
             }
         )
@@ -221,6 +300,9 @@ async def main_async(args) -> None:
         "embedding_model": emb_model,
         "retrieval": vars(retr_cfg),
         "graph": {"enabled": args.graph, "slots": args.graph_slots},
+        "global_search": args.global_search,
+        "router": {"enabled": args.router, "table": args.route_table},
+        "agent": {"enabled": args.agent, "graph_tools": not args.agent_no_graph},
         "llm_model": None if args.no_generate else settings.llm_model,
         "chunk_max_chars": chunking.MAX_CHARS,
         "n_chunks": store.count(),
@@ -247,6 +329,15 @@ def main() -> None:
     p.add_argument("--rerank", action="store_true")
     p.add_argument("--graph", action="store_true", help="GraphRAG local search")
     p.add_argument("--graph-slots", type=int, default=2, help="of k, slots for graph sections")
+    p.add_argument("--agent", action="store_true", help="agentic RAG (tool-calling loop)")
+    p.add_argument("--router", action="store_true", help="classify, then pick a pipeline")
+    p.add_argument(
+        "--route-table",
+        default="lookup=baseline,multi=agent,broad=global",
+        help="kind=pipeline pairs; pipelines: baseline, graph, agent, global",
+    )
+    p.add_argument("--global-search", action="store_true", help="answer from community summaries")
+    p.add_argument("--agent-no-graph", action="store_true", help="agent without graph tools")
     p.add_argument("--candidates", type=int, default=30)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--concurrency", type=int, default=4)

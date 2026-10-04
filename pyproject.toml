@@ -14,6 +14,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "azure-identity>=1.17",
     "azure-search-documents>=11.6",
+    "azure-storage-blob>=12.19",
 ]
 
 [project.optional-dependencies]

@@ -87,6 +87,10 @@ class NetworkxGraphStore:
 
     @classmethod
     def load(cls, path: Path) -> "NetworkxGraphStore":
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        return cls.loads(path.read_text(encoding="utf-8"))
+
+    @classmethod
+    def loads(cls, text: str) -> "NetworkxGraphStore":
+        payload = json.loads(text)
         graph = nx.node_link_graph(payload["graph"], edges="edges", multigraph=True, directed=True)
         return cls(graph, payload["communities"])
