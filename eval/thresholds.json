@@ -1,0 +1,19 @@
+{
+  "_comment": "Floors/ceilings set a little below the measured runs (docs/experiments.md, runs 16 and 19) so judge noise (+-0.03 overall, more per type) does not fail good changes. Raise them when quality improves; lower them only with a written reason.",
+  "retrieval": {
+    "overall.recall@all": {"min": 0.82},
+    "overall.mrr": {"min": 0.83},
+    "overall.recital_share": {"max": 0.01}
+  },
+  "generation": {
+    "overall.correctness": {"min": 0.86},
+    "overall.faithfulness": {"min": 0.96},
+    "overall.citation_precision": {"min": 0.78},
+    "overall.false_refusal_rate": {"max": 0.08},
+    "overall.correct_abstention_rate": {"min": 0.80},
+    "overall.recall@all": {"min": 0.85},
+    "by_type.adversarial.correctness": {"min": 0.80},
+    "by_type.cross_regulation.correctness": {"min": 0.70},
+    "by_type.global.correctness": {"min": 0.70}
+  }
+}

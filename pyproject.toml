@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 local = ["chromadb>=0.5", "sentence-transformers>=3.0"]  # local embeddings, Chroma, reranker
-dev = ["pytest>=8", "ruff>=0.5", "pre-commit>=3.7"]
+dev = ["pytest>=8", "ruff>=0.16,<0.17", "pre-commit>=3.7"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

@@ -23,3 +23,7 @@ streamlit run ui/streamlit_app.py         # chat UI with citations (API_URL env 
 ```
 
 Deploy to Container Apps (API and UI): see the flow at the top of [infra/app.tf](infra/app.tf). Images are built locally (`Dockerfile`, `Dockerfile.ui`) and pushed to ACR.
+
+## CI/CD
+
+Pull requests run lint, tests, Terraform validation, image builds and an eval gate that fails when answer quality drops below `eval/thresholds.json`; `main` deploys behind a manual approval with automatic rollback. Design and one-time GitHub setup: [docs/cicd.md](docs/cicd.md).

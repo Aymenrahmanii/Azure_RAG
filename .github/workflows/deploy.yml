@@ -1,0 +1,100 @@
+name: Deploy
+
+# main -> eval gate -> build and push images -> (manual approval) -> roll out -> smoke test,
+# with automatic rollback to the previous image if anything after the roll-out fails.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # never cancel a rollout half way
+
+env:
+  RESOURCE_GROUP: rg-azrag-dev
+  REGISTRY: acrazragdevmq8g5
+  API_APP: ca-azrag-dev-api
+  UI_APP: ca-azrag-dev-ui
+
+jobs:
+  gate:
+    if: vars.AZURE_CLIENT_ID != ''  # skipped until the repo variables exist (docs/cicd.md)
+    uses: ./.github/workflows/eval-gate.yml
+
+  build:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: az acr login --name "$REGISTRY"
+      - name: Build and push (tagged with the commit)
+        run: |
+          docker build -t "$REGISTRY.azurecr.io/azrag-api:${GITHUB_SHA}" .
+          docker build -f Dockerfile.ui -t "$REGISTRY.azurecr.io/azrag-ui:${GITHUB_SHA}" .
+          docker push "$REGISTRY.azurecr.io/azrag-api:${GITHUB_SHA}"
+          docker push "$REGISTRY.azurecr.io/azrag-ui:${GITHUB_SHA}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Add required reviewers to this environment in the repo settings: that is the approval step.
+    environment: production
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Remember what is running now (for rollback)
+        run: |
+          echo "PREV_API=$(az containerapp show -g "$RESOURCE_GROUP" -n "$API_APP" --query 'properties.template.containers[0].image' -o tsv)" >> "$GITHUB_ENV"
+          echo "PREV_UI=$(az containerapp show -g "$RESOURCE_GROUP" -n "$UI_APP" --query 'properties.template.containers[0].image' -o tsv)" >> "$GITHUB_ENV"
+
+      - name: Roll out the new images
+        run: |
+          az containerapp update -g "$RESOURCE_GROUP" -n "$API_APP" \
+            --image "$REGISTRY.azurecr.io/azrag-api:${GITHUB_SHA}" -o none
+          az containerapp update -g "$RESOURCE_GROUP" -n "$UI_APP" \
+            --image "$REGISTRY.azurecr.io/azrag-ui:${GITHUB_SHA}" -o none
+
+      - name: Wait for the new API revision to be ready
+        run: |
+          for i in $(seq 1 40); do
+            read -r latest ready < <(az containerapp show -g "$RESOURCE_GROUP" -n "$API_APP" \
+              --query "[properties.latestRevisionName, properties.latestReadyRevisionName]" -o tsv)
+            echo "latest=$latest ready=$ready"
+            [ "$latest" = "$ready" ] && exit 0
+            sleep 15
+          done
+          echo "new revision never became ready"; exit 1
+
+      - name: Smoke test
+        run: |
+          fqdn=$(az containerapp show -g "$RESOURCE_GROUP" -n "$API_APP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          curl -sf --retry 10 --retry-delay 10 --retry-all-errors "https://$fqdn/healthz"
+          echo
+          body=$(curl -sf -m 120 -X POST "https://$fqdn/chat" -H "content-type: application/json" \
+            -d '{"question":"How long does a controller have to notify a personal data breach?","mode":"baseline"}')
+          echo "$body" | grep -q "^event: done" || { echo "no done event"; echo "$body"; exit 1; }
+          echo "$body" | grep -q "72 hours" || { echo "answer does not mention 72 hours"; exit 1; }
+
+      - name: Roll back
+        if: failure()
+        run: |
+          echo "Rolling back to $PREV_API and $PREV_UI"
+          az containerapp update -g "$RESOURCE_GROUP" -n "$API_APP" --image "$PREV_API" -o none
+          az containerapp update -g "$RESOURCE_GROUP" -n "$UI_APP" --image "$PREV_UI" -o none

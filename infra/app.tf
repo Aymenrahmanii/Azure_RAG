@@ -43,6 +43,7 @@ resource "azurerm_container_app" "api" {
   resource_group_name          = azurerm_resource_group.main.name
   container_app_environment_id = azurerm_container_app_environment.main.id
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption" # the environment's default profile; pinned to avoid drift
   tags                         = local.tags
 
   identity {
@@ -57,6 +58,7 @@ resource "azurerm_container_app" "api" {
 
   ingress {
     external_enabled = true
+    transport        = "http"
     target_port      = 8000
     traffic_weight {
       latest_revision = true
@@ -141,6 +143,11 @@ resource "azurerm_container_app" "api" {
   }
 
   depends_on = [azurerm_role_assignment.app_acr_pull, azurerm_role_assignment.this]
+
+  lifecycle {
+    # CI/CD rolls out new images (az containerapp update). Terraform owns everything else.
+    ignore_changes = [template[0].container[0].image]
+  }
 }
 
 variable "chat_deployment" {
@@ -163,6 +170,7 @@ resource "azurerm_container_app" "ui" {
   resource_group_name          = azurerm_resource_group.main.name
   container_app_environment_id = azurerm_container_app_environment.main.id
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption" # the environment's default profile; pinned to avoid drift
   tags                         = local.tags
 
   identity {
@@ -177,6 +185,7 @@ resource "azurerm_container_app" "ui" {
 
   ingress {
     external_enabled = true
+    transport        = "http"
     target_port      = 8501
     traffic_weight {
       latest_revision = true
@@ -202,6 +211,10 @@ resource "azurerm_container_app" "ui" {
   }
 
   depends_on = [azurerm_role_assignment.app_acr_pull]
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
 }
 
 output "ui_url" {

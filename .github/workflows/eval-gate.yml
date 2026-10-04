@@ -1,0 +1,73 @@
+name: Eval gate
+
+# Blocks changes that make answers worse. Runs the real pipeline against the dev Azure resources
+# (read-only roles, OIDC login) and compares the metrics with eval/thresholds.json.
+on:
+  pull_request: # no path filter: a path-skipped workflow leaves a required check pending forever
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC token for azure/login
+  contents: read
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    # Skipped (not failed) when the repo variables are not configured yet, and for fork PRs,
+    # which get no OIDC token and no variables.
+    if: vars.AZURE_CLIENT_ID != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ENVIRONMENT: ci
+      VECTOR_STORE: azure_search
+      LLM_AUTH: entra
+      LLM_MODEL: gpt-5.4-mini
+      EMBEDDING_MODEL: azure-openai:text-embedding-3-small
+      AZURE_OPENAI_ENDPOINT: ${{ vars.AZURE_OPENAI_ENDPOINT }}
+      LLM_BASE_URL: ${{ vars.AZURE_OPENAI_ENDPOINT }}/openai/v1
+      AZURE_SEARCH_ENDPOINT: ${{ vars.AZURE_SEARCH_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download the knowledge graph
+        run: |
+          mkdir -p data/processed
+          az storage blob download --auth-mode login \
+            --account-name "${{ vars.STORAGE_ACCOUNT }}" --container-name graph \
+            --name graph.json --file data/processed/graph.json --only-show-errors
+
+      # Tier 1: retrieval only. Deterministic and nearly free: catches chunking, index and
+      # retrieval regressions before any LLM tokens are spent.
+      - name: Retrieval eval
+        run: python -m eval.run --label ci-retrieval --no-generate --hybrid --exclude-recitals --k 7
+      - name: Retrieval gate
+        run: python -m eval.gate "$(ls -t eval/results/*_ci-retrieval.json | head -1)" --tier retrieval
+
+      # Tier 2: the full production pipeline (agent) with the LLM judge.
+      - name: Generation eval (agent)
+        run: python -m eval.run --label ci-agent --agent --prompt fewshot --hybrid --exclude-recitals
+      - name: Generation gate
+        run: python -m eval.gate "$(ls -t eval/results/*_ci-agent.json | head -1)" --tier generation
+
+      - name: Keep the raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval/results/*.json
