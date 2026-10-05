@@ -8,6 +8,12 @@ variable "github_repo" {
   default     = "Aymenrahmanii/Azure_RAG"
 }
 
+variable "github_subject_prefix" {
+  description = "How GitHub names this repo in the OIDC `sub` claim. Newer repositories use immutable numeric IDs (owner@id/repo@id) instead of owner/repo; copy the prefix from the subject in a failed azure/login error."
+  type        = string
+  default     = "repo:Aymenrahmanii@159955326/Azure_RAG@1403411645"
+}
+
 resource "azurerm_user_assigned_identity" "ci" {
   name                = "id-${local.name}-ci"
   resource_group_name = azurerm_resource_group.main.name
@@ -18,9 +24,9 @@ resource "azurerm_user_assigned_identity" "ci" {
 locals {
   # The token's `sub` claim must match exactly: that is what limits who can become this identity.
   ci_subjects = {
-    main         = "repo:${var.github_repo}:ref:refs/heads/main"
-    pull_request = "repo:${var.github_repo}:pull_request"
-    production   = "repo:${var.github_repo}:environment:production" # deploy job, behind manual approval
+    main         = "${var.github_subject_prefix}:ref:refs/heads/main"
+    pull_request = "${var.github_subject_prefix}:pull_request"
+    production   = "${var.github_subject_prefix}:environment:production" # deploy job, behind manual approval
   }
 }
 
