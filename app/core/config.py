@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Strip whitespace: a value pasted into a CI variable or .env on Windows can end in a CR.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", str_strip_whitespace=True)
 
     environment: str = "local"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
