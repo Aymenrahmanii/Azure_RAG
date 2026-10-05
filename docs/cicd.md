@@ -77,3 +77,7 @@ python -m app.security.mint mint --key .keys/private.pem --issuer https://azrag.
 
 It expires after 30 days (then the step fails loudly, which is the reminder to mint a new one). The private
 key itself must never go into GitHub.
+
+## Verified in real Actions (2026-10-05)
+
+One pull request and one merge ran the whole path: CI jobs, eval gate (PR and `main`), OIDC login with all three federated credentials, approval in the `production` environment, image build tagged with the commit SHA, and a healthy new Container Apps revision. Three first-run problems were fixed on the way (see the learning log): GitHub's ID-based OIDC subject, a carriage return in a variable, and the read-only identity trying to manage the search index. Automatic rollback has never been triggered, so it is untested.
