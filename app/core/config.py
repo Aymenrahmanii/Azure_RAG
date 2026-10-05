@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Strip whitespace: a value pasted into a CI variable or .env on Windows can end in a CR.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", str_strip_whitespace=True)
 
     environment: str = "local"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
@@ -60,6 +61,9 @@ class Settings(BaseSettings):
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""
     azure_search_endpoint: str = ""
+    # False for read-only identities (the CI eval): they hold the data-reader role only, which
+    # cannot read the index definition, so the store must not try to create or check it.
+    azure_search_manage_index: bool = True
     azure_search_index: str = ""  # empty = derived from the embedding model name
 
 

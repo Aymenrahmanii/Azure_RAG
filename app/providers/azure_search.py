@@ -51,11 +51,19 @@ def odata_filter(filters: dict | None) -> str | None:
 
 
 class AzureSearchStore:
-    def __init__(self, endpoint: str, index_name: str, dims: int, credential: TokenCredential):
+    def __init__(
+        self,
+        endpoint: str,
+        index_name: str,
+        dims: int,
+        credential: TokenCredential,
+        manage_index: bool = True,
+    ):
         self._index_name, self._dims = index_name, dims
         self._index_client = SearchIndexClient(endpoint, credential)
         self._client = SearchClient(endpoint, index_name, credential)
-        self._ensure_index()
+        if manage_index:  # reading or creating the index definition needs a management role
+            self._ensure_index()
 
     def _ensure_index(self) -> None:
         try:
