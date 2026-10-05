@@ -1,0 +1,33 @@
+{
+  "args": {
+    "users": 10,
+    "mode": "agent",
+    "duration": 180.0,
+    "unique": true
+  },
+  "requests": 242,
+  "ok": 242,
+  "status_codes": {
+    "200": 242
+  },
+  "cache_hits": 0,
+  "rps": 1.299,
+  "total_s": {
+    "p50": 4.68,
+    "p95": 9.79,
+    "p99": 12.18
+  },
+  "fresh_total_s": {
+    "p50": 4.68,
+    "p95": 9.79,
+    "p99": 12.18
+  },
+  "failures": [],
+  "ttft_s": {
+    "p50": 4.66,
+    "p95": 9.79,
+    "p99": 12.11
+  },
+  "tokens_per_fresh_request": 3688,
+  "cost_floor_usd": 0.6693
+}

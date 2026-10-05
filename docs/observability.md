@@ -61,8 +61,31 @@ a tiny sample: token counts vary by question, so treat the figures as order of m
 
 ## Load test (`python -m eval.loadtest`)
 
-Closed-loop virtual users with one token each (the rate limit is per user). Only a smoke run has
-been done so far (2 users, 30 s, agent, 8 requests, 0 errors, p50 4.2 s, p95 6.6 s): that
-shows the tool works, **not** how the system behaves at scale. A real run (autoscaling to 3
-replicas, Azure OpenAI 429s, rate limiter) is still to do; it costs about $0.35 per 100 agent
-requests.
+Closed-loop virtual users, one token each (the rate limit is per user), 2 s mean think time, against
+the deployed API (v5, one Container App, scale 0-3, free-tier AI Search, gpt-5.4-mini).
+
+**Run B, the one that counts** (10 users, 180 s, agent mode, every question unique so the cache cannot
+answer; results in `eval/results/loadtest-10u-3m-unique-v5.json`):
+
+| Requests | Errors | Throughput | p50 | p95 | p99 | Tokens/request | Replicas |
+|---|---|---|---|---|---|---|---|
+| 242 | 0 | 1.3 req/s | 4.7 s | 9.8 s | 12.2 s | 3,688 | 1 (cold start from 0 during the test, no errors) |
+
+Reading it: with 10 concurrent users the system stayed at one replica (the scale rule is 10
+concurrent requests per replica, so this sits right at the threshold) and latency was dominated by
+LLM calls, not by the API. No 429 from Azure OpenAI or the rate limiter appeared. It does **not**
+show behaviour beyond about 10 concurrent users: autoscaling to 3 replicas and Azure OpenAI quota
+limits were not reached, so "thousands of users" remains an untested claim. Cost of the run was
+about $0.9 at the assumed prices.
+
+**Run A, a flawed first attempt, kept because of what it showed** (same settings, questions drawn
+from a pool of 36, 366 requests): 308 were cache hits (p50 1.4 s), so it mostly measured the cache,
+which is the cache working as designed, but it is not a capacity result. It also had 14 failures
+(8 x HTTP 408, 5 transport errors, 1 x 429) that did **not** reproduce in run B. I could not establish
+the cause: the server recorded no errors for them. A scale-out or cold-start effect is a
+hypothesis only, and run B's clean cold start argues against it being a general problem.
+
+Telemetry caveat found on the way: the Azure Monitor distro samples traces (about 5 per second by
+default), so `AppRequests` counts are lower than the real request count (229 recorded vs 366 sent).
+The `rag.*` metrics are not sampled and matched the client exactly, so use metrics for counts and
+traces for latency shape.

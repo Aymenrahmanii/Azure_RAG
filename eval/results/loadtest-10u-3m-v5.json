@@ -1,0 +1,29 @@
+{
+  "args": {
+    "users": 10,
+    "mode": "agent",
+    "duration": 180.0
+  },
+  "requests": 366,
+  "ok": 352,
+  "status_codes": {
+    "200": 352,
+    "408": 8,
+    "429": 1,
+    "0": 5
+  },
+  "cache_hits": 308,
+  "rps": 1.677,
+  "total_s": {
+    "p50": 1.43,
+    "p95": 9.9,
+    "p99": 20.23
+  },
+  "ttft_s": {
+    "p50": 1.43,
+    "p95": 9.9,
+    "p99": 20.23
+  },
+  "tokens_per_fresh_request": 3407,
+  "cost_floor_usd": 0.1124
+}

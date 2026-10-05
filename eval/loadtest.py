@@ -37,6 +37,8 @@ class Result:
     tokens: int = 0
     cached: bool = False
     pipeline: str | None = None
+    at: float = 0.0  # seconds since the test started
+    error: str = ""
 
 
 @dataclass
@@ -60,9 +62,11 @@ def parse_event(block: str) -> tuple[str, object] | None:
     return lines[0][7:], json.loads(lines[1].removeprefix("data: "))
 
 
-async def one_request(client: httpx.AsyncClient, url: str, token: str, body: dict) -> Result:
+async def one_request(
+    client: httpx.AsyncClient, url: str, token: str, body: dict, t0: float | None = None
+) -> Result:
     start = time.perf_counter()
-    result = Result(status=0, total=0.0)
+    result = Result(status=0, total=0.0, at=start - (t0 if t0 is not None else start))
     try:
         async with client.stream(
             "POST", f"{url}/chat", json=body, headers={"Authorization": f"Bearer {token}"}
@@ -89,21 +93,27 @@ async def one_request(client: httpx.AsyncClient, url: str, token: str, body: dic
                         elif name == "done":
                             result.tokens = data.get("tokens", 0)  # type: ignore[union-attr]
                             result.cached = bool(data.get("cached"))  # type: ignore[union-attr]
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
         result.status = 0
+        result.error = type(exc).__name__
     result.total = time.perf_counter() - start
     return result
 
 
-async def user_loop(i, args, questions, report: Report, deadline: float, key: str) -> None:
+async def user_loop(
+    i, args, questions, report: Report, deadline: float, key: str, t0: float
+) -> None:
     rng = random.Random(i)
     token = mint_token(key, args.issuer, args.audience, f"load-{i}", [], 3600)
     async with httpx.AsyncClient(timeout=args.timeout) as client:
         await asyncio.sleep(rng.uniform(0, args.think))  # de-synchronise the users
         while time.perf_counter() < deadline:
             question = rng.choice(questions)
+            if args.unique:
+                # A new number changes the cache's "anchors", so this can never be a cache hit.
+                question += f" (case {i}-{len(report.results)})"
             body = {"question": question, "mode": args.mode, "k": 7}
-            report.results.append(await one_request(client, args.url, token, body))
+            report.results.append(await one_request(client, args.url, token, body, t0))
             await asyncio.sleep(rng.uniform(0.5, 1.5) * args.think)
 
 
@@ -114,6 +124,7 @@ def summarise(report: Report) -> dict:
     for r in report.results:
         codes[str(r.status)] = codes.get(str(r.status), 0) + 1
     totals = [r.total for r in ok]
+    fresh_totals = [r.total for r in fresh]
     ttfts = [r.ttft for r in ok if r.ttft is not None]
     cost = sum(estimate_cost(r.tokens, 0, settings) for r in fresh)  # input price only: a floor
     return {
@@ -123,6 +134,17 @@ def summarise(report: Report) -> dict:
         "cache_hits": sum(r.cached for r in ok),
         "rps": round(len(report.results) / report.seconds, 3) if report.seconds else 0,
         "total_s": {f"p{p}": round(percentile(totals, p), 2) for p in (50, 95, 99)},
+        "fresh_total_s": {f"p{p}": round(percentile(fresh_totals, p), 2) for p in (50, 95, 99)},
+        "failures": [
+            {
+                "at_s": round(r.at),
+                "status": r.status,
+                "after_s": round(r.total, 1),
+                "error": r.error,
+            }
+            for r in report.results
+            if r.status != 200
+        ][:30],
         "ttft_s": {f"p{p}": round(percentile(ttfts, p), 2) for p in (50, 95, 99)},
         "tokens_per_fresh_request": round(sum(r.tokens for r in fresh) / len(fresh))
         if fresh
@@ -148,6 +170,9 @@ async def main() -> None:
         "--think", type=float, default=2.0, help="mean seconds between a user's requests"
     )
     p.add_argument("--mode", default="agent")
+    p.add_argument(
+        "--unique", action="store_true", help="make every question unique (no cache hits)"
+    )
     p.add_argument("--timeout", type=float, default=120)
     p.add_argument("--dataset", type=Path, default=Path("eval/dataset.jsonl"))
     p.add_argument("--out", type=Path, default=None)
@@ -159,10 +184,17 @@ async def main() -> None:
     start = time.perf_counter()
     deadline = start + args.duration
     await asyncio.gather(
-        *(user_loop(i, args, questions, report, deadline, key) for i in range(args.users))
+        *(user_loop(i, args, questions, report, deadline, key, start) for i in range(args.users))
     )
     report.seconds = time.perf_counter() - start
-    summary = {"args": {"users": args.users, "mode": args.mode, "duration": args.duration}}
+    summary = {
+        "args": {
+            "users": args.users,
+            "mode": args.mode,
+            "duration": args.duration,
+            "unique": args.unique,
+        }
+    }
     summary |= summarise(report)
     print(json.dumps(summary, indent=2))
     if args.out:

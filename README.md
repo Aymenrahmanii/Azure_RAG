@@ -2,7 +2,7 @@
 
 A production-style RAG system over the GDPR, the EU AI Act, NIS2 and DORA. It implements baseline hybrid RAG, GraphRAG and Agentic RAG behind one API, evaluates them on the same 60 questions, and runs on Azure with Terraform, GitHub Actions, authentication, security trimming and observability.
 
-Status: phases 1-11 done and deployed (the real load test is still to do), phase 12 (polish) in progress. Plan: [docs/PLAN.md](docs/PLAN.md).
+Status: phases 1-12 done and deployed. Plan: [docs/PLAN.md](docs/PLAN.md).
 
 Architecture diagram and the path of one request: [docs/architecture.md](docs/architecture.md).
 
@@ -36,6 +36,8 @@ Results that went against the plan, kept in the docs on purpose:
 | [docs/cicd.md](docs/cicd.md) | Pipeline design and one-time GitHub setup |
 | [docs/observability.md](docs/observability.md) | Telemetry, cache, cost per 1k queries, load test |
 | [docs/learning-log.md](docs/learning-log.md) | Problems hit and how they were solved |
+| [docs/demo.md](docs/demo.md) | Five-minute demo script |
+| [docs/blog.md](docs/blog.md) | Write-up: what worked, what did not |
 
 ## Quick start
 
@@ -72,4 +74,4 @@ Pull requests run lint, tests, Terraform validation, image builds and an eval ga
 
 ## Known limits
 
-Self-issued tokens instead of Entra ID, per-replica rate limit and cache, no VNet/private endpoints, free-tier AI Search (no SLA), a judge that shares the generator's model, and no real load test yet. Details in [docs/security.md](docs/security.md) and the ADRs.
+Self-issued tokens instead of Entra ID, per-replica rate limit and cache, no VNet/private endpoints, free-tier AI Search (no SLA), a judge that shares the generator's model, and a load test only up to 10 concurrent users (0 errors, p95 9.8 s). Details in [docs/security.md](docs/security.md) and the ADRs.

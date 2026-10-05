@@ -10,4 +10,5 @@ rule), AI Search on the free tier, pay-as-you-go Azure OpenAI, Log Analytics wit
 **Consequences.** Idle cost is roughly the container registry (about $5/month). The first request after
 idle pays a cold start (measured 4.3 s; the BM25 index is built at startup). The free Search tier has
 no replicas or SLA, so the answer to "what about thousands of users" is the design (autoscaling, rate
-limiting, 429 backoff, cache), not a demonstrated result: the real load test is still to do.
+limiting, 429 backoff, cache) plus one measurement: 10 concurrent users, 242 requests, 0 errors, p95 9.8 s
+on one replica ([observability.md](../observability.md)). Nothing beyond that was tested.
