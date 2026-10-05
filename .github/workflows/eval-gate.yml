@@ -31,6 +31,7 @@ jobs:
       AZURE_OPENAI_ENDPOINT: ${{ vars.AZURE_OPENAI_ENDPOINT }}
       LLM_BASE_URL: ${{ vars.AZURE_OPENAI_ENDPOINT }}/openai/v1
       AZURE_SEARCH_ENDPOINT: ${{ vars.AZURE_SEARCH_ENDPOINT }}
+      AZURE_SEARCH_MANAGE_INDEX: "false" # the CI identity is read-only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

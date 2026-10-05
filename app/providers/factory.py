@@ -38,7 +38,11 @@ def make_store(settings: Settings, embedder: Embedder, embedding_model: str) -> 
         dims = len(embedder.embed(["dimension probe"])[0])
         index = settings.azure_search_index or name.replace("_", "-")
         return AzureSearchStore(
-            settings.azure_search_endpoint, index, dims, DefaultAzureCredential()
+            settings.azure_search_endpoint,
+            index,
+            dims,
+            DefaultAzureCredential(),
+            settings.azure_search_manage_index,
         )
     raise ValueError(f"unknown vector_store: {settings.vector_store}")
 
