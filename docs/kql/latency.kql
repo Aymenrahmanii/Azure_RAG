@@ -1,0 +1,6 @@
+// End-to-end latency of /chat (the whole stream), per hour. Failed requests are excluded.
+AppRequests
+| where Name == "POST /chat" and Success
+| summarize p50 = percentile(DurationMs, 50), p95 = percentile(DurationMs, 95),
+            p99 = percentile(DurationMs, 99), requests = count() by bin(TimeGenerated, 1h)
+| order by TimeGenerated desc

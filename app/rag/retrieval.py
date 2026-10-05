@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from rank_bm25 import BM25Okapi
 
+from app.observability import stage
 from app.providers.base import Chunk, Embedder, RetrievedChunk, VectorStore
 from app.security.access import visible
 
@@ -83,9 +84,12 @@ class Retriever:
 
     def retrieve(self, query: str, k: int) -> list[RetrievedChunk]:
         pool = max(self.config.candidates, k)
-        results = self._dense(query, pool)
+        with stage("retrieve.dense"):  # embedding call + vector search
+            results = self._dense(query, pool)
         if self.config.hybrid:
-            results = self._rrf([results, self._sparse(query, pool)])
+            with stage("retrieve.sparse"):
+                sparse = self._sparse(query, pool)
+            results = self._rrf([results, sparse])
         if self._reranker is not None:
             scores = self._reranker.predict([(query, r.chunk.text) for r in results[:pool]])
             ranked = sorted(zip(results[:pool], scores, strict=True), key=lambda p: -p[1])

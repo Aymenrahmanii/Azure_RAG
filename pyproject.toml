@@ -16,6 +16,8 @@ dependencies = [
     "azure-search-documents>=11.6",
     "azure-storage-blob>=12.19",
     "pyjwt[crypto]>=2.8",
+    "opentelemetry-api>=1.27",
+    "azure-monitor-opentelemetry>=1.6",  # exporter + FastAPI/httpx auto-instrumentation
 ]
 
 [project.optional-dependencies]
@@ -35,6 +37,9 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]  # eval/ and ingestion/ are not installed packages; bare `pytest` needs this
+
+[tool.ruff.lint.per-file-ignores]
+"eval/cache_threshold.py" = ["E501"]  # question pairs are data, one per line
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Security"]

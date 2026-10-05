@@ -21,12 +21,14 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from app import observability
 from app.core.config import Settings, settings
 from app.graph.loader import load_graph
 from app.graph.search import GlobalSearch, GraphConfig, GraphRetriever
 from app.providers.factory import make_embedder, make_llm, make_store
 from app.providers.openai_compat import Usage, usage_var
 from app.rag.agent import Agent
+from app.rag.cache import CachedAnswer, MemoEmbedder, SemanticCache, scope_key
 from app.rag.pipeline import RAGPipeline
 from app.rag.retrieval import RetrievalConfig, Retriever
 from app.rag.router import PipelineRunner, Router
@@ -39,6 +41,7 @@ from app.security.sanitize import StreamSanitizer, sanitize_output
 
 log = logging.getLogger("api")
 Mode = Literal["auto", "baseline", "graph", "agent", "global"]
+BLOCKED_PREFIX = "Request blocked"  # content-filter replies are never cached
 
 
 class ChatRequest(BaseModel):
@@ -59,6 +62,7 @@ class Services:
     limiter: SlidingWindowLimiter = field(default_factory=lambda: SlidingWindowLimiter(0))
     all_sources: frozenset[str] = frozenset()
     audit_salt: str = ""
+    cache: SemanticCache | None = None
 
     def available(self) -> list[str]:
         have = {
@@ -97,13 +101,22 @@ def build_services() -> Services:
     config = RetrievalConfig(
         exclude_recitals=True, hybrid=settings.retrieval_hybrid, rerank=settings.retrieval_rerank
     )
-    retriever = Retriever(embedder, store, config)
+    memo = MemoEmbedder(embedder)  # the cache lookup and retrieval share one query embedding
+    retriever = Retriever(memo, store, config)
     sec = {
         "auth": auth,
         "policy": policy,
         "limiter": limiter,
         "all_sources": frozenset(c.metadata["source"] for c in retriever.chunks),
         "audit_salt": settings.audit_salt,
+        "cache": SemanticCache(
+            lambda q: memo.embed([q])[0],
+            settings.cache_threshold,
+            settings.cache_ttl_seconds,
+            settings.cache_max_entries,
+        )
+        if settings.cache_enabled
+        else None,
     }
     llm = make_llm(settings)
     baseline = RAGPipeline(retriever, llm)
@@ -126,6 +139,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
+telemetry_on = observability.setup(settings)  # before FastAPI() so the app is auto-instrumented
 app = FastAPI(title="EU Regulatory Compliance Assistant", lifespan=lifespan)
 
 
@@ -217,22 +231,37 @@ async def chat(
         meter = Usage()
         usage_var.set(meter)  # everything this request spends on the LLM is counted here
         # Security trimming: which documents this caller may see, for every retrieval path below.
-        visible_token = set_visible(
-            svc.policy.visible_sources(user.groups, svc.all_sources) if svc.auth else None
-        )
+        visible = svc.policy.visible_sources(user.groups, svc.all_sources) if svc.auth else None
+        visible_token = set_visible(visible)
         name = kind = None
+        cached, answer_text = False, ""
         returned: list = []
         status = "ok"
         try:
-            name, kind = await choose(svc, body.mode, question)
-            yield sse("route", {"pipeline": name, "kind": kind})
+            scope = scope_key(visible, body.mode, body.k)
+            hit = None
+            if svc.cache is not None:
+                with observability.stage("cache.lookup"):
+                    hit, similarity = await asyncio.to_thread(svc.cache.lookup, scope, question)
+                observability.cache_total.add(1, {"result": "hit" if hit else "miss"})
+            if hit:
+                cached, name, kind, returned = True, hit.pipeline, hit.kind, hit.sources
+                yield sse("route", {"pipeline": name, "kind": kind, "cached": True})
+            else:
+                name, kind = await choose(svc, body.mode, question)
+                yield sse("route", {"pipeline": name, "kind": kind})
             if pii:
                 masked = ", ".join(f"{label} x{n}" for label, n in sorted(pii.items()))
                 yield sse(
                     "notice", {"message": f"Personal data was masked in your question: {masked}"}
                 )
 
-            if name in ("baseline", "graph"):
+            if hit:
+                yield sources_event(hit.sources)
+                first_token = time.perf_counter() - start
+                answer_text = hit.text
+                yield sse("token", hit.text)
+            elif name in ("baseline", "graph"):
                 pipeline = svc.graph if name == "graph" else svc.baseline
                 safe = StreamSanitizer()  # no links or images in answers, even split across tokens
                 async for what, value in pipeline.stream(question, body.k):
@@ -241,8 +270,10 @@ async def chat(
                         yield sources_event(value)
                     elif piece := safe.feed(value):
                         first_token = first_token or time.perf_counter() - start
+                        answer_text += piece
                         yield sse("token", piece)
                 if tail := safe.flush():
+                    answer_text += tail
                     yield sse("token", tail)
             else:
                 steps: asyncio.Queue = asyncio.Queue()
@@ -270,13 +301,22 @@ async def chat(
                 returned = answer.sources
                 yield sources_event(answer.sources)
                 first_token = time.perf_counter() - start
-                yield sse("token", sanitize_output(answer.text))
+                answer_text = sanitize_output(answer.text)
+                yield sse("token", answer_text)
 
+            if (
+                svc.cache is not None
+                and not cached
+                and answer_text
+                and not answer_text.startswith(BLOCKED_PREFIX)
+            ):
+                svc.cache.store(scope, question, CachedAnswer(name, kind, answer_text, returned))
             done = {
                 "ttft_s": first_token,
                 "total_s": time.perf_counter() - start,
                 "tokens": meter.prompt_tokens + meter.completion_tokens,
                 "llm_calls": meter.calls,
+                "cached": cached,
             }
             yield sse("done", done)
         except Exception:
@@ -284,10 +324,24 @@ async def chat(
             log.exception("chat failed")
             yield sse("error", {"message": "The assistant failed to answer. Try again."})
         finally:
+            seconds = time.perf_counter() - start
+            observability.record_request(
+                pipeline=name or "none",
+                status=status,
+                seconds=seconds,
+                ttft=first_token,
+                prompt_tokens=meter.prompt_tokens,
+                completion_tokens=meter.completion_tokens,
+                llm_calls=meter.calls,
+                cost=observability.estimate_cost(
+                    meter.prompt_tokens, meter.completion_tokens, settings
+                ),
+                cached=cached,
+            )
             audit.record(
                 user_id=user.id,
                 question=question,
-                status=status,
+                status="cache_hit" if cached and status == "ok" else status,
                 pipeline=name,
                 kind=kind,
                 sections=[
@@ -296,7 +350,7 @@ async def chat(
                 ],
                 tokens=meter.prompt_tokens + meter.completion_tokens,
                 llm_calls=meter.calls,
-                seconds=time.perf_counter() - start,
+                seconds=seconds,
                 pii=pii,
                 salt=svc.audit_salt,
             )

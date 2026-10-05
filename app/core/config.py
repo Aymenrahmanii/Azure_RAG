@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 20  # per user; 0 disables
     audit_salt: str = ""  # salts the user/question hashes in the audit log
 
+    # Semantic cache (in process memory, per replica). See app/rag/cache.py for the safety rules.
+    cache_enabled: bool = True
+    # Cosine similarity. 0.97 = near-exact repeats only: below it, hard negatives ("required" vs
+    # "not required") hit. Measured by `python -m eval.cache_threshold` (docs/observability.md).
+    cache_threshold: float = 0.97
+    cache_ttl_seconds: float = 3600
+    cache_max_entries: int = 500
+
+    # Observability. Empty connection string = telemetry is a no-op.
+    applicationinsights_connection_string: str = ""
+    # USD per million tokens, used for the cost estimate. ASSUMPTION: check the Azure price sheet
+    # for your deployment and override; the numbers in docs/observability.md use these values.
+    price_input_per_mtok: float = 0.75
+    price_output_per_mtok: float = 4.50
+
     azure_openai_endpoint: str = ""
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""

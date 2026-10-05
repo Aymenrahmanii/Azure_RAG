@@ -1,0 +1,6 @@
+// Where the time goes: our own spans (rag.*) and the calls they make.
+AppDependencies
+| where Name startswith "rag." or Name == "POST /openai/v1/embeddings" or Name has "search"
+| summarize calls = count(), p50 = percentile(DurationMs, 50), p95 = percentile(DurationMs, 95)
+    by Name
+| order by p95 desc

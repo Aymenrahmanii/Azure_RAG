@@ -1,0 +1,8 @@
+// Spend and tokens per pipeline per day, from the rag.* metrics (cost uses the configured prices).
+AppMetrics
+| where Name in ("rag.cost.usd", "rag.requests")
+| extend pipeline = tostring(Properties.pipeline), cached = tostring(Properties.cached)
+| summarize usd = sumif(Sum, Name == "rag.cost.usd"), requests = sumif(Sum, Name == "rag.requests")
+    by day = bin(TimeGenerated, 1d), pipeline
+| extend usd_per_1k_requests = round(1000 * usd / requests, 2)
+| order by day desc, pipeline asc

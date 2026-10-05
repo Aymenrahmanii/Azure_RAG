@@ -98,6 +98,11 @@ resource "azurerm_container_app" "api" {
     value = random_password.audit_salt.result
   }
 
+  secret {
+    name  = "appinsights-connection-string"
+    value = azurerm_application_insights.main.connection_string
+  }
+
   ingress {
     external_enabled = true
     transport        = "http"
@@ -194,6 +199,14 @@ resource "azurerm_container_app" "api" {
       env {
         name        = "AUDIT_SALT"
         secret_name = "audit-salt"
+      }
+      env {
+        name        = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        secret_name = "appinsights-connection-string"
+      }
+      env {
+        name  = "OTEL_PYTHON_EXCLUDED_URLS" # liveness/startup probes would otherwise be ~70% of requests
+        value = "healthz"
       }
 
       startup_probe {

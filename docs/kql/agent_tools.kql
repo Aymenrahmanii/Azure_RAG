@@ -1,0 +1,5 @@
+// Agent tool usage and latency.
+AppDependencies
+| where Name == "rag.agent.tool"
+| extend tool = tostring(Properties.tool)
+| summarize calls = count(), p50 = percentile(DurationMs, 50), p95 = percentile(DurationMs, 95) by tool

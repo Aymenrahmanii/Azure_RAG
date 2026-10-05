@@ -77,3 +77,20 @@ def test_no_renderable_link_or_image_syntax_survives(payload):
     out = sanitize_output(f"before {payload} after")
     assert not LINK_SYNTAX.search(out), out
     assert "<" not in out or "evil" not in out.split("<", 1)[1]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("within 72 hours [1]", "within 72 hours [1]"),  # answer ends on a citation
+        ("see [1, 2]", "see [1, 2]"),
+        ("contact [EMAIL]", "contact [EMAIL]"),
+        ("read [the notice]", "read the notice"),
+        ("look ![chart]", "look "),  # an unfinished image is still dropped
+    ],
+)
+def test_stream_ending_right_after_a_closing_bracket_keeps_the_text(text, expected):
+    assert sanitize_output(text) == expected
+    for cut in range(len(text) + 1):  # and for every way the stream could have been split
+        san = StreamSanitizer()
+        assert san.feed(text[:cut]) + san.feed(text[cut:]) + san.flush() == expected

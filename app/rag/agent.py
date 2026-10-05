@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 
 from app.graph.store import GraphStore, section_key
+from app.observability import stage
 from app.providers.base import RetrievedChunk
 from app.providers.openai_compat import ContentFiltered, Usage, usage_var
 from app.rag.pipeline import Answer
@@ -286,7 +287,8 @@ class Agent:
                     )
                 else:
                     tool_calls_made += 1
-                    result, new = await self._dispatch(ev, name, args)
+                    with stage("agent.tool", tool=name):
+                        result, new = await self._dispatch(ev, name, args)
                     note = ""
                 trace.append(
                     Step(

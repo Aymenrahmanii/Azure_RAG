@@ -1,0 +1,10 @@
+// Cache hit rate and request outcomes per hour.
+AppMetrics
+| where Name in ("rag.cache", "rag.requests")
+| extend result = tostring(Properties.result), status = tostring(Properties.status)
+| summarize hits = sumif(Sum, Name == "rag.cache" and result == "hit"),
+            lookups = sumif(Sum, Name == "rag.cache"),
+            errors = sumif(Sum, Name == "rag.requests" and status == "error"),
+            requests = sumif(Sum, Name == "rag.requests") by bin(TimeGenerated, 1h)
+| extend hit_rate = round(todouble(hits) / lookups, 3), error_rate = round(todouble(errors) / requests, 3)
+| order by TimeGenerated desc

@@ -43,8 +43,10 @@ class StreamSanitizer:
 
     def flush(self) -> str:
         """End of stream. An unfinished URL or tag is dropped; other held text is emitted."""
-        state, raw = self._state, self._raw
+        state, raw, rendered = self._state, self._raw, self._rendered
         self._reset()
+        if state == AFTER:  # the stream ended right after a closing "]": no "(" can follow
+            return rendered
         return "" if state in (URL, TAG) else raw
 
     def _release(self, ch: str) -> str:
